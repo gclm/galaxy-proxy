@@ -1,0 +1,263 @@
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+/// 角色
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    System,
+    User,
+    Assistant,
+    Tool,
+    Developer,
+}
+
+/// 内容类型
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ContentPart {
+    Text {
+        text: String,
+    },
+    ImageUrl {
+        image_url: ImageUrl,
+    },
+    InputAudio {
+        input_audio: InputAudio,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    ToolResult {
+        tool_call_id: String,
+        content: String,
+    },
+}
+
+/// 图片 URL
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageUrl {
+    pub url: String,
+    pub detail: Option<String>,
+}
+
+/// 输入音频
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InputAudio {
+    pub data: String,
+    pub format: String,
+}
+
+/// 内容（字符串或数组）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Content {
+    Text(String),
+    Parts(Vec<ContentPart>),
+}
+
+/// 工具调用
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCall {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub call_type: String,
+    pub function: FunctionCall,
+}
+
+/// 函数调用
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionCall {
+    pub name: String,
+    pub arguments: String,
+}
+
+/// 消息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Message {
+    pub role: Role,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<Content>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
+}
+
+/// 工具定义
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Tool {
+    #[serde(rename = "type")]
+    pub tool_type: String,
+    pub function: FunctionDefinition,
+}
+
+/// 函数定义
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionDefinition {
+    pub name: String,
+    pub description: Option<String>,
+    pub parameters: Option<serde_json::Value>,
+}
+
+/// 工具选择
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ToolChoice {
+    None,
+    Auto,
+    Required,
+    Function { function: FunctionName },
+}
+
+/// 函数名称
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionName {
+    pub name: String,
+}
+
+/// 停止原因
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum FinishReason {
+    Stop,
+    Length,
+    ToolCalls,
+    ContentFilter,
+    FunctionCall,
+}
+
+/// 使用量
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Usage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_tokens_details: Option<PromptTokensDetails>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion_tokens_details: Option<CompletionTokensDetails>,
+}
+
+/// Prompt Token 详情
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PromptTokensDetails {
+    pub cached_tokens: u32,
+}
+
+/// Completion Token 详情
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CompletionTokensDetails {
+    pub reasoning_tokens: u32,
+}
+
+/// 统一请求模型
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmRequest {
+    pub model: String,
+    pub messages: Vec<Message>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_completion_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<Tool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<ToolChoice>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+    /// 额外字段（不发送给 LLM）
+    #[serde(skip)]
+    pub extra: HashMap<String, serde_json::Value>,
+}
+
+/// 选择
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Choice {
+    pub index: u32,
+    pub message: Message,
+    pub finish_reason: Option<FinishReason>,
+}
+
+/// 流式选择
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamChoice {
+    pub index: u32,
+    pub delta: Message,
+    pub finish_reason: Option<FinishReason>,
+}
+
+/// 统一响应模型
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmResponse {
+    pub id: String,
+    pub object: String,
+    pub created: i64,
+    pub model: String,
+    pub choices: Vec<Choice>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Usage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_fingerprint: Option<String>,
+}
+
+/// 流式响应模型
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmStreamResponse {
+    pub id: String,
+    pub object: String,
+    pub created: i64,
+    pub model: String,
+    pub choices: Vec<StreamChoice>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Usage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_fingerprint: Option<String>,
+}
+
+impl LlmRequest {
+    /// 获取 stream 标志
+    pub fn is_stream(&self) -> bool {
+        self.stream.unwrap_or(false)
+    }
+}
+
+impl LlmResponse {
+    /// 获取第一个选择
+    pub fn first_choice(&self) -> Option<&Choice> {
+        self.choices.first()
+    }
+
+    /// 获取完成原因
+    pub fn finish_reason(&self) -> Option<&FinishReason> {
+        self.choices.first().and_then(|c| c.finish_reason.as_ref())
+    }
+}
+
+impl LlmStreamResponse {
+    /// 获取第一个选择
+    pub fn first_choice(&self) -> Option<&StreamChoice> {
+        self.choices.first()
+    }
+
+    /// 是否是结束事件
+    pub fn is_done(&self) -> bool {
+        self.choices.first()
+            .and_then(|c| c.finish_reason.as_ref())
+            .is_some()
+    }
+}

@@ -259,3 +259,48 @@ async fn test_api_key_crud() {
     // 清理测试数据
     let _ = std::fs::remove_dir_all("/tmp/galaxy_test_api_key");
 }
+
+#[test]
+fn test_openai_chat_transform() {
+    use galaxy_proxy::protocol::inbound::Inbound;
+    use galaxy_proxy::protocol::openai_chat::OpenAiChatInbound;
+
+    let inbound = OpenAiChatInbound;
+    let headers = axum::http::HeaderMap::new();
+
+    let body = r#"{
+        "model": "gpt-4o",
+        "messages": [
+            {"role": "user", "content": "Hello"}
+        ],
+        "stream": false
+    }"#;
+
+    let request = tokio_test::block_on(inbound.transform_request(body.as_bytes(), &headers)).unwrap();
+
+    assert_eq!(request.model, "gpt-4o");
+    assert_eq!(request.messages.len(), 1);
+    assert_eq!(request.messages[0].role, galaxy_proxy::protocol::model::Role::User);
+}
+
+#[test]
+fn test_anthropic_transform() {
+    use galaxy_proxy::protocol::inbound::Inbound;
+    use galaxy_proxy::protocol::anthropic::AnthropicInbound;
+
+    let inbound = AnthropicInbound;
+    let headers = axum::http::HeaderMap::new();
+
+    let body = r#"{
+        "model": "claude-sonnet-4-20250514",
+        "max_tokens": 1024,
+        "messages": [
+            {"role": "user", "content": "Hello"}
+        ]
+    }"#;
+
+    let request = tokio_test::block_on(inbound.transform_request(body.as_bytes(), &headers)).unwrap();
+
+    assert_eq!(request.model, "claude-sonnet-4-20250514");
+    assert_eq!(request.messages.len(), 1);
+}
