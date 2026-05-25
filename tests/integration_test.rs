@@ -127,3 +127,82 @@ async fn test_channel_crud() {
     // 清理测试数据
     let _ = std::fs::remove_dir_all("/tmp/galaxy_test_channel");
 }
+
+#[tokio::test]
+async fn test_group_crud() {
+    let db_path = "/tmp/galaxy_test_group/test.db";
+    let db_url = format!("sqlite:{}?mode=rwc", db_path);
+
+    // 清理测试数据
+    let _ = std::fs::remove_dir_all("/tmp/galaxy_test_group");
+    std::fs::create_dir_all("/tmp/galaxy_test_group").unwrap();
+
+    let db = galaxy_proxy::db::Database::new(&db_url).await.unwrap();
+    let pool = db.pool().clone();
+
+    // 先创建一个渠道
+    let channel_id = uuid::Uuid::now_v7().to_string();
+    sqlx::query(
+        "INSERT INTO channels (id, name, type, base_url, api_keys) VALUES (?, ?, ?, ?, ?)"
+    )
+    .bind(&channel_id)
+    .bind("test-channel")
+    .bind("openai_chat")
+    .bind("https://api.openai.com")
+    .bind(r#"["sk-test"]"#)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 创建分组
+    let group_id = uuid::Uuid::now_v7().to_string();
+    sqlx::query(
+        "INSERT INTO groups (id, name, mode) VALUES (?, ?, ?)"
+    )
+    .bind(&group_id)
+    .bind("test-group")
+    .bind("weighted")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 添加分组项
+    let item_id = uuid::Uuid::now_v7().to_string();
+    sqlx::query(
+        "INSERT INTO group_items (id, group_id, channel_id, model_name, priority, weight) VALUES (?, ?, ?, ?, ?, ?)"
+    )
+    .bind(&item_id)
+    .bind(&group_id)
+    .bind(&channel_id)
+    .bind("gpt-4o")
+    .bind(1)
+    .bind(100)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 查询分组
+    let fetched_name: String = sqlx::query_scalar(
+        "SELECT name FROM groups WHERE id = ?"
+    )
+    .bind(&group_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(fetched_name, "test-group");
+
+    // 查询分组项
+    let item_count: i32 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM group_items WHERE group_id = ?"
+    )
+    .bind(&group_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(item_count, 1);
+
+    // 清理测试数据
+    let _ = std::fs::remove_dir_all("/tmp/galaxy_test_group");
+}

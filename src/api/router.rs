@@ -5,6 +5,7 @@ use tower_http::trace::TraceLayer;
 
 use crate::api::handlers::admin::auth::{self, AuthState};
 use crate::api::handlers::admin::channels::{self, ChannelState};
+use crate::api::handlers::admin::groups::{self, GroupState};
 
 /// 创建应用路由
 pub fn create_router(pool: SqlitePool, jwt_secret: String) -> Router {
@@ -17,6 +18,10 @@ pub fn create_router(pool: SqlitePool, jwt_secret: String) -> Router {
         pool: pool.clone(),
     };
 
+    let group_state = GroupState {
+        pool: pool.clone(),
+    };
+
     Router::new()
         // 健康检查
         .route("/health", get(health_check))
@@ -26,6 +31,8 @@ pub fn create_router(pool: SqlitePool, jwt_secret: String) -> Router {
         .nest("/api/v1/admin/auth", auth_routes(auth_state))
         // 管理 API 路由 - 渠道
         .nest("/api/v1/admin/channels", channel_routes(channel_state))
+        // 管理 API 路由 - 分组
+        .nest("/api/v1/admin/groups", group_routes(group_state))
         // 注入 JWT secret 到 extensions
         .layer(middleware::from_fn(move |mut req: axum::http::Request<axum::body::Body>, next: middleware::Next| {
             let secret = jwt_secret.clone();
@@ -68,4 +75,14 @@ fn channel_routes(channel_state: ChannelState) -> Router {
         .route("/", get(channels::list).post(channels::create))
         .route("/{id}", get(channels::get).put(channels::update).delete(channels::delete))
         .with_state(channel_state)
+}
+
+/// 分组路由
+fn group_routes(group_state: GroupState) -> Router {
+    Router::new()
+        .route("/", get(groups::list).post(groups::create))
+        .route("/{id}", get(groups::get).put(groups::update).delete(groups::delete))
+        .route("/{id}/items", post(groups::add_item))
+        .route("/{id}/items/{item_id}", delete(groups::delete_item))
+        .with_state(group_state)
 }
