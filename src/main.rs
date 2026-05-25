@@ -4,9 +4,11 @@ use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
 
 mod api;
+mod auth;
 mod config;
 mod db;
 
+use auth::JwtService;
 use config::AppConfig;
 use db::Database;
 
@@ -21,14 +23,14 @@ async fn main() -> Result<()> {
     info!("Configuration loaded from {:?}", config_path);
 
     // 初始化数据库
-    let _database = Database::new(&config.database_url()).await?;
+    let database = Database::new(&config.database_url()).await?;
     info!("Database initialized");
 
     // 检查是否需要初始化 JWT 密钥
     let config = ensure_jwt_secret(config, &config_path)?;
 
     // 创建路由
-    let app = api::create_router();
+    let app = api::create_router(database.pool().clone(), config.auth.jwt_secret.clone());
 
     // 启动服务器
     let addr = config.server_addr();

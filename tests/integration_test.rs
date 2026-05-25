@@ -56,3 +56,22 @@ async fn test_database_init() {
     let _ = std::fs::remove_file(db_path);
     let _ = std::fs::remove_dir_all("/tmp/galaxy_test");
 }
+
+#[test]
+fn test_password_hash() {
+    let password = "test_password_123";
+    let hash = galaxy_proxy::auth::PasswordService::hash_password(password).unwrap();
+
+    assert!(galaxy_proxy::auth::PasswordService::verify_password(password, &hash).unwrap());
+    assert!(!galaxy_proxy::auth::PasswordService::verify_password("wrong", &hash).unwrap());
+}
+
+#[test]
+fn test_jwt_token() {
+    let jwt_service = galaxy_proxy::auth::JwtService::new("test_secret", 24);
+    let token = jwt_service.generate_token("1", "admin").unwrap();
+    let claims = jwt_service.verify_token(&token).unwrap();
+
+    assert_eq!(claims.sub, "1");
+    assert_eq!(claims.username, "admin");
+}
