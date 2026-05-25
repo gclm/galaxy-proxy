@@ -75,3 +75,53 @@ fn test_jwt_token() {
     assert_eq!(claims.sub, "1");
     assert_eq!(claims.username, "admin");
 }
+
+#[tokio::test]
+async fn test_channel_crud() {
+    let db_path = "/tmp/galaxy_test_channel/test.db";
+    let db_url = format!("sqlite:{}?mode=rwc", db_path);
+
+    // 清理测试数据
+    let _ = std::fs::remove_dir_all("/tmp/galaxy_test_channel");
+    std::fs::create_dir_all("/tmp/galaxy_test_channel").unwrap();
+
+    let db = galaxy_proxy::db::Database::new(&db_url).await.unwrap();
+    let pool = db.pool().clone();
+
+    // 创建渠道
+    let channel_id: i64 = sqlx::query_scalar(
+        "INSERT INTO channels (name, type, base_url, api_keys) VALUES (?, ?, ?, ?) RETURNING id"
+    )
+    .bind("test-channel")
+    .bind("openai_chat")
+    .bind("https://api.openai.com")
+    .bind(r#"["sk-test"]"#)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert!(channel_id > 0);
+
+    // 查询渠道
+    let fetched_name: String = sqlx::query_scalar(
+        "SELECT name FROM channels WHERE id = ?"
+    )
+    .bind(channel_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(fetched_name, "test-channel");
+
+    // 删除渠道
+    let result = sqlx::query("DELETE FROM channels WHERE id = ?")
+        .bind(channel_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(result.rows_affected(), 1);
+
+    // 清理测试数据
+    let _ = std::fs::remove_dir_all("/tmp/galaxy_test_channel");
+}
