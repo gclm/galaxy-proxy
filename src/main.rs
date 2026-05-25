@@ -72,8 +72,8 @@ fn get_config_path() -> PathBuf {
 fn ensure_jwt_secret(mut config: AppConfig, config_path: &PathBuf) -> Result<AppConfig> {
     if config.auth.jwt_secret.is_empty() {
         use rand::Rng;
-        let secret: String = rand::thread_rng()
-            .sample_iter(&rand::distributions::Alphanumeric)
+        let secret: String = rand::rng()
+            .sample_iter(&rand::distr::Alphanumeric)
             .take(32)
             .map(char::from)
             .collect();

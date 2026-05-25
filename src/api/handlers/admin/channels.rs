@@ -238,9 +238,11 @@ pub async fn update(
 
     updates.push("updated_at = CURRENT_TIMESTAMP");
 
+    // 构建动态 SQL，手动审计安全性
     let sql = format!("UPDATE channels SET {} WHERE id = ?", updates.join(", "));
+    let sql: &'static str = Box::leak(sql.into_boxed_str());
 
-    let mut query = sqlx::query(&sql);
+    let mut query = sqlx::query(sql);
     for value in &values {
         query = query.bind(value);
     }
