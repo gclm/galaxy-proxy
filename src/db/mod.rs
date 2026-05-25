@@ -228,7 +228,7 @@ fn get_migrations() -> Vec<Migration> {
             name: "create_users",
             sql: r#"
             CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT PRIMARY KEY,
                 username TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -241,7 +241,7 @@ fn get_migrations() -> Vec<Migration> {
             name: "create_channels",
             sql: r#"
             CREATE TABLE IF NOT EXISTS channels (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE,
                 type TEXT NOT NULL CHECK (type IN ('openai_chat', 'openai_response', 'anthropic')),
                 base_url TEXT NOT NULL,
@@ -263,7 +263,7 @@ fn get_migrations() -> Vec<Migration> {
             name: "create_api_keys",
             sql: r#"
             CREATE TABLE IF NOT EXISTS api_keys (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 api_key TEXT NOT NULL UNIQUE,
                 enabled BOOLEAN NOT NULL DEFAULT TRUE,
@@ -277,7 +277,7 @@ fn get_migrations() -> Vec<Migration> {
             name: "create_groups",
             sql: r#"
             CREATE TABLE IF NOT EXISTS groups (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE,
                 mode TEXT NOT NULL CHECK (mode IN ('round_robin', 'random', 'failover', 'weighted')),
                 match_regex TEXT,
@@ -295,9 +295,9 @@ fn get_migrations() -> Vec<Migration> {
             name: "create_group_items",
             sql: r#"
             CREATE TABLE IF NOT EXISTS group_items (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-                channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+                id TEXT PRIMARY KEY,
+                group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+                channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
                 model_name TEXT NOT NULL,
                 priority INTEGER NOT NULL DEFAULT 1,
                 weight INTEGER NOT NULL DEFAULT 100,
@@ -311,7 +311,7 @@ fn get_migrations() -> Vec<Migration> {
             name: "create_model_pricing",
             sql: r#"
             CREATE TABLE IF NOT EXISTS model_pricing (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT PRIMARY KEY,
                 model TEXT NOT NULL UNIQUE,
                 input_per_million REAL NOT NULL,
                 output_per_million REAL NOT NULL,
@@ -327,10 +327,10 @@ fn get_migrations() -> Vec<Migration> {
             name: "create_usage_logs",
             sql: r#"
             CREATE TABLE IF NOT EXISTS usage_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                api_key_id INTEGER REFERENCES api_keys(id),
-                channel_id INTEGER REFERENCES channels(id),
-                group_id INTEGER REFERENCES groups(id),
+                id TEXT PRIMARY KEY,
+                api_key_id TEXT REFERENCES api_keys(id),
+                channel_id TEXT REFERENCES channels(id),
+                group_id TEXT REFERENCES groups(id),
                 requested_model TEXT NOT NULL,
                 actual_model TEXT,
                 input_tokens INTEGER NOT NULL DEFAULT 0,
@@ -350,11 +350,11 @@ fn get_migrations() -> Vec<Migration> {
             name: "create_usage_daily",
             sql: r#"
             CREATE TABLE IF NOT EXISTS usage_daily (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT PRIMARY KEY,
                 date TEXT NOT NULL,
-                api_key_id INTEGER REFERENCES api_keys(id),
-                channel_id INTEGER REFERENCES channels(id),
-                group_id INTEGER REFERENCES groups(id),
+                api_key_id TEXT REFERENCES api_keys(id),
+                channel_id TEXT REFERENCES channels(id),
+                group_id TEXT REFERENCES groups(id),
                 model TEXT NOT NULL,
                 request_count INTEGER NOT NULL DEFAULT 0,
                 success_count INTEGER NOT NULL DEFAULT 0,

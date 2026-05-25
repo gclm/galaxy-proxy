@@ -88,25 +88,27 @@ async fn test_channel_crud() {
     let db = galaxy_proxy::db::Database::new(&db_url).await.unwrap();
     let pool = db.pool().clone();
 
+    // 生成 UUID
+    let channel_id = uuid::Uuid::now_v7().to_string();
+
     // 创建渠道
-    let channel_id: i64 = sqlx::query_scalar(
-        "INSERT INTO channels (name, type, base_url, api_keys) VALUES (?, ?, ?, ?) RETURNING id"
+    sqlx::query(
+        "INSERT INTO channels (id, name, type, base_url, api_keys) VALUES (?, ?, ?, ?, ?)"
     )
+    .bind(&channel_id)
     .bind("test-channel")
     .bind("openai_chat")
     .bind("https://api.openai.com")
     .bind(r#"["sk-test"]"#)
-    .fetch_one(&pool)
+    .execute(&pool)
     .await
     .unwrap();
-
-    assert!(channel_id > 0);
 
     // 查询渠道
     let fetched_name: String = sqlx::query_scalar(
         "SELECT name FROM channels WHERE id = ?"
     )
-    .bind(channel_id)
+    .bind(&channel_id)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -115,7 +117,7 @@ async fn test_channel_crud() {
 
     // 删除渠道
     let result = sqlx::query("DELETE FROM channels WHERE id = ?")
-        .bind(channel_id)
+        .bind(&channel_id)
         .execute(&pool)
         .await
         .unwrap();

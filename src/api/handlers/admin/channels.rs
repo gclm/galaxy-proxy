@@ -2,6 +2,8 @@ use axum::{extract::{Path, State}, http::StatusCode, Json};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
+use crate::api::{ApiError, ApiResponse, response::generate_id};
+
 /// 渠道类型
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -24,7 +26,7 @@ impl std::fmt::Display for ChannelType {
 /// 渠道
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Channel {
-    pub id: i64,
+    pub id: String,
     pub name: String,
     #[serde(rename = "type")]
     pub channel_type: ChannelType,
@@ -84,13 +86,13 @@ pub struct ChannelState {
 /// 获取渠道列表
 pub async fn list(
     State(state): State<ChannelState>,
-) -> Result<Json<Vec<Channel>>, (StatusCode, String)> {
-    let channels = sqlx::query_as::<_, (i64, String, String, String, String, String, Option<i32>, Option<i32>, i32, i32, i32, bool, String, String)>(
-        "SELECT id, name, type, base_url, api_keys, model_maps, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at FROM channels ORDER BY id"
+) -> Result<Json<ApiResponse<Vec<Channel>>>, (StatusCode, Json<ApiError>)> {
+    let channels = sqlx::query_as::<_, (String, String, String, String, String, String, Option<i32>, Option<i32>, i32, i32, i32, bool, String, String)>(
+        "SELECT id, name, type, base_url, api_keys, model_maps, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at FROM channels ORDER BY created_at DESC"
     )
     .fetch_all(&state.pool)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
     let result: Vec<Channel> = channels
         .into_iter()
@@ -123,35 +125,36 @@ pub async fn list(
         })
         .collect();
 
-    Ok(Json(result))
+    Ok(Json(ApiResponse::success(result)))
 }
 
 /// 创建渠道
 pub async fn create(
     State(state): State<ChannelState>,
     Json(req): Json<CreateChannelRequest>,
-) -> Result<(StatusCode, Json<Channel>), (StatusCode, String)> {
+) -> Result<(StatusCode, Json<ApiResponse<Channel>>), (StatusCode, Json<ApiError>)> {
     // 验证输入
     if req.name.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "渠道名称不能为空".to_string()));
+        return Err(ApiError::bad_request("渠道名称不能为空"));
     }
     if req.api_keys.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "至少需要一个 API Key".to_string()));
+        return Err(ApiError::bad_request("至少需要一个 API Key"));
     }
 
+    let id = generate_id();
     let api_keys_json = serde_json::to_string(&req.api_keys)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| ApiError::internal_error(e.to_string()))?;
     let model_maps_json = serde_json::to_string(&req.model_maps.unwrap_or_default())
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
     // 插入渠道
-    let id: i64 = sqlx::query_scalar(
+    sqlx::query(
         r#"
-        INSERT INTO channels (name, type, base_url, api_keys, model_maps, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        RETURNING id
+        INSERT INTO channels (id, name, type, base_url, api_keys, model_maps, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#
     )
+    .bind(&id)
     .bind(&req.name)
     .bind(req.channel_type.to_string())
     .bind(&req.base_url)
@@ -163,79 +166,45 @@ pub async fn create(
     .bind(req.blacklist_minutes.unwrap_or(10))
     .bind(req.concurrency.unwrap_or(10))
     .bind(req.enabled.unwrap_or(true))
-    .fetch_one(&state.pool)
+    .execute(&state.pool)
     .await
     .map_err(|e| {
         if e.to_string().contains("UNIQUE constraint failed") {
-            (StatusCode::CONFLICT, "渠道名称已存在".to_string())
+            ApiError::conflict("渠道名称已存在")
         } else {
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+            ApiError::internal_error(e.to_string())
         }
     })?;
 
     // 返回创建的渠道
-    get(State(state), Path(id)).await
-        .map(|Json(channel)| (StatusCode::CREATED, Json(channel)))
+    let channel = get_channel_by_id(&state.pool, &id).await?;
+    Ok((StatusCode::CREATED, Json(ApiResponse::success(channel))))
 }
 
 /// 获取单个渠道
 pub async fn get(
     State(state): State<ChannelState>,
-    Path(id): Path<i64>,
-) -> Result<Json<Channel>, (StatusCode, String)> {
-    let result = sqlx::query_as::<_, (i64, String, String, String, String, String, Option<i32>, Option<i32>, i32, i32, i32, bool, String, String)>(
-        "SELECT id, name, type, base_url, api_keys, model_maps, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at FROM channels WHERE id = ?"
-    )
-    .bind(id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    let (id, name, type_str, base_url, api_keys_str, model_maps_str, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at) =
-        result.ok_or_else(|| (StatusCode::NOT_FOUND, "渠道不存在".to_string()))?;
-
-    let channel_type = match type_str.as_str() {
-        "openai_chat" => ChannelType::OpenAiChat,
-        "openai_response" => ChannelType::OpenAiResponse,
-        "anthropic" => ChannelType::Anthropic,
-        _ => ChannelType::OpenAiChat,
-    };
-
-    let channel = Channel {
-        id,
-        name,
-        channel_type,
-        base_url,
-        api_keys: serde_json::from_str(&api_keys_str).unwrap_or_default(),
-        model_maps: serde_json::from_str(&model_maps_str).unwrap_or_default(),
-        rate_limit_rpm,
-        rate_limit_tpm,
-        failure_threshold,
-        blacklist_minutes,
-        concurrency,
-        enabled,
-        created_at,
-        updated_at,
-    };
-
-    Ok(Json(channel))
+    Path(id): Path<String>,
+) -> Result<Json<ApiResponse<Channel>>, (StatusCode, Json<ApiError>)> {
+    let channel = get_channel_by_id(&state.pool, &id).await?;
+    Ok(Json(ApiResponse::success(channel)))
 }
 
 /// 更新渠道
 pub async fn update(
     State(state): State<ChannelState>,
-    Path(id): Path<i64>,
+    Path(id): Path<String>,
     Json(req): Json<UpdateChannelRequest>,
-) -> Result<Json<Channel>, (StatusCode, String)> {
+) -> Result<Json<ApiResponse<Channel>>, (StatusCode, Json<ApiError>)> {
     // 检查渠道是否存在
-    let existing = sqlx::query_scalar::<_, i64>("SELECT id FROM channels WHERE id = ?")
-        .bind(id)
+    let existing = sqlx::query_scalar::<_, String>("SELECT id FROM channels WHERE id = ?")
+        .bind(&id)
         .fetch_optional(&state.pool)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
     if existing.is_none() {
-        return Err((StatusCode::NOT_FOUND, "渠道不存在".to_string()));
+        return Err(ApiError::not_found("渠道不存在"));
     }
 
     // 构建更新语句
@@ -264,7 +233,7 @@ pub async fn update(
     }
 
     if updates.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "没有需要更新的字段".to_string()));
+        return Err(ApiError::bad_request("没有需要更新的字段"));
     }
 
     updates.push("updated_at = CURRENT_TIMESTAMP");
@@ -275,30 +244,69 @@ pub async fn update(
     for value in &values {
         query = query.bind(value);
     }
-    query = query.bind(id);
+    query = query.bind(&id);
 
     query.execute(&state.pool)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
     // 返回更新后的渠道
-    get(State(state), Path(id)).await
+    let channel = get_channel_by_id(&state.pool, &id).await?;
+    Ok(Json(ApiResponse::success(channel)))
 }
 
 /// 删除渠道
 pub async fn delete(
     State(state): State<ChannelState>,
-    Path(id): Path<i64>,
-) -> Result<StatusCode, (StatusCode, String)> {
+    Path(id): Path<String>,
+) -> Result<Json<ApiResponse<()>>, (StatusCode, Json<ApiError>)> {
     let result = sqlx::query("DELETE FROM channels WHERE id = ?")
-        .bind(id)
+        .bind(&id)
         .execute(&state.pool)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
     if result.rows_affected() == 0 {
-        return Err((StatusCode::NOT_FOUND, "渠道不存在".to_string()));
+        return Err(ApiError::not_found("渠道不存在"));
     }
 
-    Ok(StatusCode::NO_CONTENT)
+    Ok(Json(crate::api::response::success_empty()))
+}
+
+/// 根据 ID 获取渠道
+async fn get_channel_by_id(pool: &SqlitePool, id: &str) -> Result<Channel, (StatusCode, Json<ApiError>)> {
+    let result = sqlx::query_as::<_, (String, String, String, String, String, String, Option<i32>, Option<i32>, i32, i32, i32, bool, String, String)>(
+        "SELECT id, name, type, base_url, api_keys, model_maps, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at FROM channels WHERE id = ?"
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| ApiError::internal_error(e.to_string()))?;
+
+    let (id, name, type_str, base_url, api_keys_str, model_maps_str, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at) =
+        result.ok_or_else(|| ApiError::not_found("渠道不存在"))?;
+
+    let channel_type = match type_str.as_str() {
+        "openai_chat" => ChannelType::OpenAiChat,
+        "openai_response" => ChannelType::OpenAiResponse,
+        "anthropic" => ChannelType::Anthropic,
+        _ => ChannelType::OpenAiChat,
+    };
+
+    Ok(Channel {
+        id,
+        name,
+        channel_type,
+        base_url,
+        api_keys: serde_json::from_str(&api_keys_str).unwrap_or_default(),
+        model_maps: serde_json::from_str(&model_maps_str).unwrap_or_default(),
+        rate_limit_rpm,
+        rate_limit_tpm,
+        failure_threshold,
+        blacklist_minutes,
+        concurrency,
+        enabled,
+        created_at,
+        updated_at,
+    })
 }
