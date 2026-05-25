@@ -1,0 +1,32 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 项目特定
+data/
+logs/
+*.db
+*.db-shm
+*.db-wal
+config.toml
+
+# 前端
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# 测试数据
+test_data/
+tmp/
