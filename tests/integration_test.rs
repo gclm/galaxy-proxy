@@ -206,3 +206,56 @@ async fn test_group_crud() {
     // 清理测试数据
     let _ = std::fs::remove_dir_all("/tmp/galaxy_test_group");
 }
+
+#[tokio::test]
+async fn test_api_key_crud() {
+    let db_path = "/tmp/galaxy_test_api_key/test.db";
+    let db_url = format!("sqlite:{}?mode=rwc", db_path);
+
+    // 清理测试数据
+    let _ = std::fs::remove_dir_all("/tmp/galaxy_test_api_key");
+    std::fs::create_dir_all("/tmp/galaxy_test_api_key").unwrap();
+
+    let db = galaxy_proxy::db::Database::new(&db_url).await.unwrap();
+    let pool = db.pool().clone();
+
+    // 创建 API Key
+    let key_id = uuid::Uuid::now_v7().to_string();
+    let api_key = format!("gp-{}", uuid::Uuid::now_v7());
+
+    sqlx::query(
+        "INSERT INTO api_keys (id, name, api_key, enabled) VALUES (?, ?, ?, ?)"
+    )
+    .bind(&key_id)
+    .bind("test-key")
+    .bind(&api_key)
+    .bind(true)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 查询 API Key
+    let fetched_name: String = sqlx::query_scalar(
+        "SELECT name FROM api_keys WHERE id = ?"
+    )
+    .bind(&key_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(fetched_name, "test-key");
+
+    // 验证 API Key
+    let enabled: bool = sqlx::query_scalar(
+        "SELECT enabled FROM api_keys WHERE api_key = ?"
+    )
+    .bind(&api_key)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert!(enabled);
+
+    // 清理测试数据
+    let _ = std::fs::remove_dir_all("/tmp/galaxy_test_api_key");
+}
