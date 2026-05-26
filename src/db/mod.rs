@@ -279,7 +279,6 @@ fn get_migrations() -> Vec<Migration> {
             CREATE TABLE IF NOT EXISTS groups (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE,
-                mode TEXT NOT NULL CHECK (mode IN ('round_robin', 'random', 'failover', 'weighted')),
                 match_regex TEXT,
                 retry_enabled BOOLEAN NOT NULL DEFAULT TRUE,
                 max_retries INTEGER NOT NULL DEFAULT 3,

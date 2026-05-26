@@ -30,7 +30,6 @@ impl std::fmt::Display for GroupMode {
 pub struct Group {
     pub id: String,
     pub name: String,
-    pub mode: GroupMode,
     pub match_regex: Option<String>,
     pub retry_enabled: bool,
     pub max_retries: i32,
@@ -55,7 +54,6 @@ pub struct GroupItem {
 #[derive(Debug, Deserialize)]
 pub struct CreateGroupRequest {
     pub name: String,
-    pub mode: GroupMode,
     pub match_regex: Option<String>,
     pub retry_enabled: Option<bool>,
     pub max_retries: Option<i32>,
@@ -77,7 +75,6 @@ pub struct CreateGroupItemRequest {
 #[derive(Debug, Deserialize)]
 pub struct UpdateGroupRequest {
     pub name: Option<String>,
-    pub mode: Option<GroupMode>,
     pub match_regex: Option<String>,
     pub retry_enabled: Option<bool>,
     pub max_retries: Option<i32>,
@@ -104,29 +101,20 @@ pub struct GroupState {
 pub async fn list(
     State(state): State<GroupState>,
 ) -> Result<Json<ApiResponse<Vec<Group>>>, (StatusCode, Json<ApiError>)> {
-    let groups = sqlx::query_as::<_, (String, String, String, Option<String>, bool, i32, i32, bool, String, String)>(
-        "SELECT id, name, mode, match_regex, retry_enabled, max_retries, first_token_timeout_secs, enabled, created_at, updated_at FROM groups ORDER BY created_at DESC"
+    let groups = sqlx::query_as::<_, (String, String, Option<String>, bool, i32, i32, bool, String, String)>(
+        "SELECT id, name, match_regex, retry_enabled, max_retries, first_token_timeout_secs, enabled, created_at, updated_at FROM groups ORDER BY created_at DESC"
     )
     .fetch_all(&state.pool)
     .await
     .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
     let mut result = Vec::new();
-    for (id, name, mode_str, match_regex, retry_enabled, max_retries, first_token_timeout_secs, enabled, created_at, updated_at) in groups {
-        let mode = match mode_str.as_str() {
-            "round_robin" => GroupMode::RoundRobin,
-            "random" => GroupMode::Random,
-            "failover" => GroupMode::Failover,
-            "weighted" => GroupMode::Weighted,
-            _ => GroupMode::RoundRobin,
-        };
-
+    for (id, name, match_regex, retry_enabled, max_retries, first_token_timeout_secs, enabled, created_at, updated_at) in groups {
         let items = get_group_items(&state.pool, &id).await?;
 
         result.push(Group {
             id,
             name,
-            mode,
             match_regex,
             retry_enabled,
             max_retries,
@@ -163,13 +151,12 @@ pub async fn create(
     // 插入分组
     sqlx::query(
         r#"
-        INSERT INTO groups (id, name, mode, match_regex, retry_enabled, max_retries, first_token_timeout_secs, enabled)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO groups (id, name, match_regex, retry_enabled, max_retries, first_token_timeout_secs, enabled)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         "#
     )
     .bind(&group_id)
     .bind(&req.name)
-    .bind(req.mode.to_string())
     .bind(&req.match_regex)
     .bind(req.retry_enabled.unwrap_or(true))
     .bind(req.max_retries.unwrap_or(3))
@@ -253,10 +240,6 @@ pub async fn update(
     if let Some(name) = &req.name {
         updates.push("name = ?");
         values.push(name.clone());
-    }
-    if let Some(mode) = &req.mode {
-        updates.push("mode = ?");
-        values.push(mode.to_string());
     }
     if let Some(match_regex) = &req.match_regex {
         updates.push("match_regex = ?");
@@ -379,31 +362,22 @@ pub async fn delete_item(
 
 /// 根据 ID 获取分组
 async fn get_group_by_id(pool: &SqlitePool, id: &str) -> Result<Group, (StatusCode, Json<ApiError>)> {
-    let result = sqlx::query_as::<_, (String, String, String, Option<String>, bool, i32, i32, bool, String, String)>(
-        "SELECT id, name, mode, match_regex, retry_enabled, max_retries, first_token_timeout_secs, enabled, created_at, updated_at FROM groups WHERE id = ?"
+    let result = sqlx::query_as::<_, (String, String, Option<String>, bool, i32, i32, bool, String, String)>(
+        "SELECT id, name, match_regex, retry_enabled, max_retries, first_token_timeout_secs, enabled, created_at, updated_at FROM groups WHERE id = ?"
     )
     .bind(id)
     .fetch_optional(pool)
     .await
     .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
-    let (id, name, mode_str, match_regex, retry_enabled, max_retries, first_token_timeout_secs, enabled, created_at, updated_at) =
+    let (id, name, match_regex, retry_enabled, max_retries, first_token_timeout_secs, enabled, created_at, updated_at) =
         result.ok_or_else(|| ApiError::not_found("分组不存在"))?;
-
-    let mode = match mode_str.as_str() {
-        "round_robin" => GroupMode::RoundRobin,
-        "random" => GroupMode::Random,
-        "failover" => GroupMode::Failover,
-        "weighted" => GroupMode::Weighted,
-        _ => GroupMode::RoundRobin,
-    };
 
     let items = get_group_items(pool, &id).await?;
 
     Ok(Group {
         id,
         name,
-        mode,
         match_regex,
         retry_enabled,
         max_retries,

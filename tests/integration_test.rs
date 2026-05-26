@@ -157,11 +157,10 @@ async fn test_group_crud() {
     // 创建分组
     let group_id = uuid::Uuid::now_v7().to_string();
     sqlx::query(
-        "INSERT INTO groups (id, name, mode) VALUES (?, ?, ?)"
+        "INSERT INTO groups (id, name) VALUES (?, ?)"
     )
     .bind(&group_id)
     .bind("test-group")
-    .bind("weighted")
     .execute(&pool)
     .await
     .unwrap();

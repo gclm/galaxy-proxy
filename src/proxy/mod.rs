@@ -23,7 +23,6 @@ pub struct ChannelInfo {
 pub struct GroupInfo {
     pub id: String,
     pub name: String,
-    pub mode: String,
     pub items: Vec<GroupItemInfo>,
 }
 
@@ -93,8 +92,8 @@ impl ProxyState {
 
     /// 根据名称查找分组
     async fn find_group_by_name(&self, name: &str) -> Result<Option<GroupInfo>, ProxyError> {
-        let result = sqlx::query_as::<_, (String, String, String)>(
-            "SELECT id, name, mode FROM groups WHERE name = ? AND enabled = 1"
+        let result = sqlx::query_as::<_, (String, String)>(
+            "SELECT id, name FROM groups WHERE name = ? AND enabled = 1"
         )
         .bind(name)
         .fetch_optional(&self.pool)
@@ -102,9 +101,9 @@ impl ProxyState {
         .map_err(|e| ProxyError::DatabaseError(e.to_string()))?;
 
         match result {
-            Some((id, name, mode)) => {
+            Some((id, name)) => {
                 let items = self.get_group_items(&id).await?;
-                Ok(Some(GroupInfo { id, name, mode, items }))
+                Ok(Some(GroupInfo { id, name, items }))
             }
             None => Ok(None),
         }
@@ -112,19 +111,19 @@ impl ProxyState {
 
     /// 根据正则查找分组
     async fn find_group_by_regex(&self, model: &str) -> Result<Option<GroupInfo>, ProxyError> {
-        let groups = sqlx::query_as::<_, (String, String, String, Option<String>)>(
-            "SELECT id, name, mode, match_regex FROM groups WHERE enabled = 1 AND match_regex IS NOT NULL"
+        let groups = sqlx::query_as::<_, (String, String, Option<String>)>(
+            "SELECT id, name, match_regex FROM groups WHERE enabled = 1 AND match_regex IS NOT NULL"
         )
         .fetch_all(&self.pool)
         .await
         .map_err(|e| ProxyError::DatabaseError(e.to_string()))?;
 
-        for (id, name, mode, match_regex) in groups {
+        for (id, name, match_regex) in groups {
             if let Some(regex) = match_regex {
                 if let Ok(re) = regex::Regex::new(&regex) {
                     if re.is_match(model) {
                         let items = self.get_group_items(&id).await?;
-                        return Ok(Some(GroupInfo { id, name, mode, items }));
+                        return Ok(Some(GroupInfo { id, name, items }));
                     }
                 }
             }
@@ -153,49 +152,59 @@ impl ProxyState {
         }).collect())
     }
 
-    /// 从分组中选择一个渠道项
+    /// 从分组中选择一个渠道项（自适应负载均衡）
     async fn select_group_item(&self, group: &GroupInfo) -> Result<GroupItemInfo, ProxyError> {
         if group.items.is_empty() {
             return Err(ProxyError::NoAvailableChannel("分组没有可用渠道".to_string()));
         }
 
-        match group.mode.as_str() {
-            "round_robin" => {
-                // 简单轮询：返回第一个
-                Ok(group.items[0].clone())
-            }
-            "random" => {
-                use rand::Rng;
-                let mut rng = rand::rng();
-                let idx = rng.random_range(0..group.items.len());
-                Ok(group.items[idx].clone())
-            }
-            "failover" => {
-                // 按优先级返回第一个
-                Ok(group.items[0].clone())
-            }
-            "weighted" => {
-                // 按权重随机选择
-                let total_weight: i32 = group.items.iter().map(|i| i.weight).sum();
-                if total_weight == 0 {
-                    return Ok(group.items[0].clone());
-                }
+        // 计算每个渠道的评分
+        let mut scored_items: Vec<(f64, &GroupItemInfo)> = Vec::new();
 
-                use rand::Rng;
-                let mut rng = rand::rng();
-                let mut random_weight = rng.random_range(0..total_weight);
-
-                for item in &group.items {
-                    random_weight -= item.weight;
-                    if random_weight < 0 {
-                        return Ok(item.clone());
-                    }
-                }
-
-                Ok(group.items[0].clone())
-            }
-            _ => Ok(group.items[0].clone()),
+        for item in &group.items {
+            let score = self.calculate_channel_score(&item.channel_id, item.weight).await;
+            scored_items.push((score, item));
         }
+
+        // 按评分排序
+        scored_items.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Top-K 加权随机选择（K=3）
+        let top_k = 3.min(scored_items.len());
+        let top_items = &scored_items[..top_k];
+
+        if top_items.is_empty() {
+            return Err(ProxyError::NoAvailableChannel("没有可用渠道".to_string()));
+        }
+
+        // 加权随机选择
+        let total_score: f64 = top_items.iter().map(|(score, _)| score).sum();
+        if total_score <= 0.0 {
+            return Ok(top_items[0].1.clone());
+        }
+
+        use rand::Rng;
+        let mut rng = rand::rng();
+        let mut random_value = rng.random_range(0.0..total_score);
+
+        for (score, item) in top_items {
+            random_value -= score;
+            if random_value <= 0.0 {
+                return Ok((*item).clone());
+            }
+        }
+
+        Ok(top_items[0].1.clone())
+    }
+
+    /// 计算渠道评分
+    async fn calculate_channel_score(&self, channel_id: &str, weight: i32) -> f64 {
+        // 基础分 = 权重
+        let mut score = weight as f64;
+
+        // 查询渠道状态（简化版，实际应该从数据库读取错误率等）
+        // 这里暂时只使用权重作为评分
+        score
     }
 
     /// 获取渠道信息
