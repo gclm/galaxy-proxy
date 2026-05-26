@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/stores/auth'
 import { Button } from '@/components/ui/button'
 import {
@@ -6,10 +7,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { User, LogOut } from 'lucide-react'
+import { User, LogOut, Settings } from 'lucide-react'
 
 export function Header() {
   const { user, logout } = useAuthStore()
+  const navigate = useNavigate()
 
   return (
     <header className="flex h-16 items-center justify-between border-b px-6">
@@ -27,6 +29,10 @@ export function Header() {
             <span className="text-sm text-muted-foreground">
               {user?.username}
             </span>
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => navigate('/settings')}>
+            <Settings className="mr-2 h-4 w-4" />
+            <span>设置</span>
           </DropdownMenuItem>
           <DropdownMenuItem onClick={logout}>
             <LogOut className="mr-2 h-4 w-4" />
