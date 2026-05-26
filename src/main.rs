@@ -9,6 +9,7 @@ mod config;
 mod db;
 mod protocol;
 mod proxy;
+mod stats;
 
 use auth::JwtService;
 use config::AppConfig;

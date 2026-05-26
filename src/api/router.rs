@@ -7,8 +7,10 @@ use crate::api::handlers::admin::api_keys::{self, ApiKeyState};
 use crate::api::handlers::admin::auth::{self, AuthState};
 use crate::api::handlers::admin::channels::{self, ChannelState};
 use crate::api::handlers::admin::groups::{self, GroupState};
+use crate::api::handlers::admin::stats::{self, StatsApiState};
 use crate::api::handlers::proxy::{chat, responses, messages, models};
 use crate::proxy::ProxyState;
+use crate::stats::StatsState;
 
 /// 创建应用路由
 pub fn create_router(pool: SqlitePool, jwt_secret: String) -> Router {
@@ -29,6 +31,10 @@ pub fn create_router(pool: SqlitePool, jwt_secret: String) -> Router {
         pool: pool.clone(),
     };
 
+    let stats_state = StatsApiState {
+        stats: StatsState::new(pool.clone()),
+    };
+
     let proxy_state = ProxyState::new(pool.clone());
 
     Router::new()
@@ -44,6 +50,8 @@ pub fn create_router(pool: SqlitePool, jwt_secret: String) -> Router {
         .nest("/api/v1/admin/groups", group_routes(group_state))
         // 管理 API 路由 - API Key
         .nest("/api/v1/admin/api-keys", api_key_routes(api_key_state))
+        // 管理 API 路由 - 统计
+        .nest("/api/v1/admin/stats", stats_routes(stats_state))
         // 注入 JWT secret 到 extensions
         .layer(middleware::from_fn(move |mut req: axum::http::Request<axum::body::Body>, next: middleware::Next| {
             let secret = jwt_secret.clone();
@@ -109,4 +117,14 @@ fn api_key_routes(api_key_state: ApiKeyState) -> Router {
         .route("/", get(api_keys::list).post(api_keys::create))
         .route("/{id}", get(api_keys::get).put(api_keys::update).delete(api_keys::delete))
         .with_state(api_key_state)
+}
+
+/// 统计路由
+fn stats_routes(stats_state: StatsApiState) -> Router {
+    Router::new()
+        .route("/overview", get(stats::overview))
+        .route("/models", get(stats::models))
+        .route("/channels", get(stats::channels))
+        .route("/daily", get(stats::daily))
+        .with_state(stats_state)
 }
