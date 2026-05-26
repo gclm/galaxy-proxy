@@ -1,12 +1,16 @@
 # Galaxy Proxy Makefile
 
-.PHONY: build run test clean fmt clippy release docker help
+.PHONY: build run test clean fmt clippy release docker help frontend-build
 
 # 默认目标
 all: build
 
-# 开发构建
-build:
+# 前端构建
+frontend-build:
+	cd frontend && pnpm install && pnpm build
+
+# 开发构建（包含前端）
+build: frontend-build
 	cargo build
 
 # 运行

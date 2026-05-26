@@ -20,6 +20,7 @@ use crate::api::handlers::admin::stats::{self, StatsApiState};
 use crate::api::handlers::proxy::{chat, embeddings, images, messages, models, responses};
 use crate::config::QueuingConfig;
 use crate::proxy::ProxyState;
+use crate::static_assets;
 use crate::stats::StatsState;
 
 /// 创建应用路由
@@ -217,79 +218,4 @@ fn pricing_routes(pricing_state: PricingState) -> Router {
         .route("/", get(pricing::list).put(pricing::update))
         .route("/{model}", get(pricing::get))
         .with_state(pricing_state)
-}
-
-/// 静态文件服务模块
-mod static_assets {
-    use rust_embed::Embed;
-
-    #[derive(Embed)]
-    #[folder = "static_dist/"]
-    pub struct StaticAssets;
-
-    use axum::{
-        body::Body,
-        http::{header, HeaderValue, Request, Response, StatusCode},
-    };
-    use std::sync::LazyLock;
-
-    static FALLBACK: &str = "index.html";
-
-    pub async fn serve(req: Request<Body>) -> Response<Body> {
-        let path = req.uri().path();
-
-        // 跳过 API 路由（不应该到这里）
-        if path.starts_with("/api/") || path.starts_with("/v1/") {
-            return Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(Body::empty())
-                .unwrap();
-        }
-
-        // SPA fallback: 返回 index.html
-        let file_path = if path == "/" || path == "" || !path.contains('.') {
-            FALLBACK
-        } else {
-            path.trim_start_matches('/')
-        };
-
-        let asset = StaticAssets::get(file_path);
-        let Some(asset) = asset else {
-            // 尝试 fallback 到 index.html
-            if file_path != FALLBACK {
-                if let Some(index) = StaticAssets::get(FALLBACK) {
-                    return Response::builder()
-                        .status(StatusCode::OK)
-                        .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
-                        .body(Body::from(index.data))
-                        .unwrap();
-                }
-            }
-            return Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(Body::empty())
-                .unwrap();
-        };
-
-        let content_type = mime_guess::from_path(file_path)
-            .first_or_octet_stream()
-            .to_string();
-
-        Response::builder()
-            .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, content_type)
-            .header(
-                header::CACHE_CONTROL,
-                if file_path == FALLBACK {
-                    HeaderValue::from_static("no-cache")
-                } else {
-                    static CACHE_ONE_YEAR: LazyLock<HeaderValue> = LazyLock::new(|| {
-                        HeaderValue::from_static("public, max-age=31536000, immutable")
-                    });
-                    CACHE_ONE_YEAR.clone()
-                },
-            )
-            .body(Body::from(asset.data))
-            .unwrap()
-    }
 }

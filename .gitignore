@@ -26,6 +26,7 @@ config.toml
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+static_dist/
 
 # 测试数据
 test_data/
