@@ -1,5 +1,8 @@
 use axum::{
+    body::Body,
+    http::{Request, StatusCode},
     middleware,
+    response::Response,
     routing::{delete, get, post, put},
     Json, Router,
 };
@@ -54,10 +57,12 @@ pub fn create_router(pool: SqlitePool, jwt_secret: String, queuing: &QueuingConf
     };
 
     Router::new()
-        // 健康检查
-        .route("/health", get(health_check))
+        // 健康检查（返回初始化状态）
+        .route("/api/v1/health", get(health_check))
         // 代理 API 路由
         .nest("/v1", proxy_routes(proxy_state, pool.clone()))
+        // 初始化接口（无需认证）
+        .nest("/api/v1/init", init_routes(auth_state.clone()))
         // 管理 API 路由 - 认证
         .nest("/api/v1/admin/auth", auth_routes(auth_state))
         // 管理 API 路由 - 渠道
@@ -72,12 +77,16 @@ pub fn create_router(pool: SqlitePool, jwt_secret: String, queuing: &QueuingConf
         .nest("/api/v1/admin/stats", stats_routes(stats_state))
         // 管理 API 路由 - 定价
         .nest("/api/v1/admin/pricing", pricing_routes(pricing_state))
-        // 注入 JWT secret 到 extensions
+        // 静态文件服务（SPA fallback）
+        .fallback(static_assets::serve)
+        // 注入 pool 和 JWT secret 到 extensions
         .layer(middleware::from_fn(
-            move |mut req: axum::http::Request<axum::body::Body>, next: middleware::Next| {
+            move |mut req: Request<Body>, next: middleware::Next| {
                 let secret = jwt_secret.clone();
+                let pool = pool.clone();
                 async move {
                     req.extensions_mut().insert(secret);
+                    req.extensions_mut().insert(pool);
                     next.run(req).await
                 }
             },
@@ -86,11 +95,20 @@ pub fn create_router(pool: SqlitePool, jwt_secret: String, queuing: &QueuingConf
         .layer(TraceLayer::new_for_http())
 }
 
-/// 健康检查端点
-async fn health_check() -> Json<Value> {
+/// 健康检查端点（返回初始化状态）
+async fn health_check(
+    axum::Extension(pool): axum::Extension<SqlitePool>,
+) -> Json<Value> {
+    let needs_setup = sqlx::query_scalar::<_, i32>("SELECT COUNT(*) FROM users")
+        .fetch_one(&pool)
+        .await
+        .map(|count| count == 0)
+        .unwrap_or(true);
+
     Json(json!({
         "status": "ok",
-        "version": env!("CARGO_PKG_VERSION")
+        "version": env!("CARGO_PKG_VERSION"),
+        "needs_setup": needs_setup
     }))
 }
 
@@ -110,7 +128,7 @@ fn proxy_routes(proxy_state: ProxyState, pool: SqlitePool) -> Router {
         .with_state(proxy_state)
         .route("/models", get(models::list))
         .with_state(pool)
-        .layer(middleware::from_fn(move |mut req: axum::http::Request<axum::body::Body>, next: middleware::Next| {
+        .layer(middleware::from_fn(move |mut req: Request<Body>, next: middleware::Next| {
             let pool = pool_clone.clone();
             let cache = api_key_cache.clone();
             async move {
@@ -121,10 +139,16 @@ fn proxy_routes(proxy_state: ProxyState, pool: SqlitePool) -> Router {
         }))
 }
 
+/// 初始化路由（无需认证）
+fn init_routes(auth_state: AuthState) -> Router {
+    Router::new()
+        .route("/", post(auth::init))
+        .with_state(auth_state)
+}
+
 /// 认证路由
 fn auth_routes(auth_state: AuthState) -> Router {
     Router::new()
-        .route("/setup", post(auth::setup))
         .route("/login", post(auth::login))
         .route("/me", get(auth::me))
         .route("/password", put(auth::change_password))
@@ -193,4 +217,79 @@ fn pricing_routes(pricing_state: PricingState) -> Router {
         .route("/", get(pricing::list).put(pricing::update))
         .route("/{model}", get(pricing::get))
         .with_state(pricing_state)
+}
+
+/// 静态文件服务模块
+mod static_assets {
+    use rust_embed::Embed;
+
+    #[derive(Embed)]
+    #[folder = concat!(env!("CARGO_MANIFEST_DIR"), "/static_dist/")]
+    pub struct StaticAssets;
+
+    use axum::{
+        body::Body,
+        http::{header, HeaderValue, Request, Response, StatusCode},
+    };
+    use std::sync::LazyLock;
+
+    static FALLBACK: &str = "index.html";
+
+    pub async fn serve(req: Request<Body>) -> Response<Body> {
+        let path = req.uri().path();
+
+        // 跳过 API 路由（不应该到这里）
+        if path.starts_with("/api/") || path.starts_with("/v1/") {
+            return Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::empty())
+                .unwrap();
+        }
+
+        // SPA fallback: 返回 index.html
+        let file_path = if path == "/" || path == "" || !path.contains('.') {
+            FALLBACK
+        } else {
+            path.trim_start_matches('/')
+        };
+
+        let asset = StaticAssets::get(file_path);
+        let Some(asset) = asset else {
+            // 尝试 fallback 到 index.html
+            if file_path != FALLBACK {
+                if let Some(index) = StaticAssets::get(FALLBACK) {
+                    return Response::builder()
+                        .status(StatusCode::OK)
+                        .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+                        .body(Body::from(index.data))
+                        .unwrap();
+                }
+            }
+            return Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::empty())
+                .unwrap();
+        };
+
+        let content_type = mime_guess::from_path(file_path)
+            .first_or_octet_stream()
+            .to_string();
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, content_type)
+            .header(
+                header::CACHE_CONTROL,
+                if file_path == FALLBACK {
+                    HeaderValue::from_static("no-cache")
+                } else {
+                    static CACHE_ONE_YEAR: LazyLock<HeaderValue> = LazyLock::new(|| {
+                        HeaderValue::from_static("public, max-age=31536000, immutable")
+                    });
+                    CACHE_ONE_YEAR.clone()
+                },
+            )
+            .body(Body::from(asset.data))
+            .unwrap()
+    }
 }
