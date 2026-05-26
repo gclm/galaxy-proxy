@@ -3,7 +3,7 @@ import type { Channel, CreateChannelRequest, EndpointConfig, EndpointType, Model
 import { channelsApi } from '@/api/channels'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus, Trash2, RefreshCw } from 'lucide-react'
+import { Plus, Trash2, RefreshCw, X } from 'lucide-react'
 
 interface ChannelFormProps {
   channel?: Channel
@@ -49,21 +49,23 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
   const [enabled, setEnabled] = useState(channel?.enabled ?? true)
   const [submitting, setSubmitting] = useState(false)
   const [fetchingModels, setFetchingModels] = useState(false)
+  const [fetchFailed, setFetchFailed] = useState(false)
+  const [manualModelInput, setManualModelInput] = useState('')
 
   const handleFetchModels = async () => {
-    const endpoint = endpoints[0]
+    const validEndpoints = endpoints.filter(ep => ep.base_url.trim())
     const apiKey = apiKeys[0]
 
-    if (!endpoint?.base_url || !apiKey) {
+    if (validEndpoints.length === 0 || !apiKey) {
       alert('请先填写端点地址和 API Key')
       return
     }
 
     setFetchingModels(true)
+    setFetchFailed(false)
     try {
       const models = await channelsApi.fetchModels({
-        endpoint_type: endpoint.type,
-        base_url: endpoint.base_url,
+        endpoints: validEndpoints,
         api_key: apiKey,
       })
       setModelsConfig(prev => ({
@@ -71,10 +73,28 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
         available_models: models,
       }))
     } catch (error: any) {
-      alert(`获取模型失败: ${error.response?.data?.message || error.message}`)
+      setFetchFailed(true)
     } finally {
       setFetchingModels(false)
     }
+  }
+
+  const addManualModel = () => {
+    const model = manualModelInput.trim()
+    if (model && !modelsConfig.available_models.includes(model)) {
+      setModelsConfig(prev => ({
+        ...prev,
+        available_models: [...prev.available_models, model],
+      }))
+      setManualModelInput('')
+    }
+  }
+
+  const removeModel = (model: string) => {
+    setModelsConfig(prev => ({
+      ...prev,
+      available_models: prev.available_models.filter(m => m !== model),
+    }))
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -241,25 +261,51 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
               </Button>
             </div>
 
-            {modelsConfig.available_models.length > 0 && (
-              <div>
-                <label className="block text-sm font-medium mb-1">
-                  可用模型 ({modelsConfig.available_models.length})
-                </label>
+            {fetchFailed && (
+              <div className="rounded-md bg-yellow-50 border border-yellow-200 p-3 text-sm text-yellow-800">
+                获取模型失败，请手动添加模型
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                可用模型 ({modelsConfig.available_models.length})
+              </label>
+              <div className="flex gap-2 mb-2">
+                <input
+                  type="text"
+                  value={manualModelInput}
+                  onChange={(e) => setManualModelInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addManualModel())}
+                  className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  placeholder="输入模型名称，回车添加"
+                />
+                <Button type="button" variant="outline" size="sm" onClick={addManualModel}>
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+              {modelsConfig.available_models.length > 0 && (
                 <div className="max-h-40 overflow-y-auto rounded-md border border-input bg-background p-2 text-sm">
                   <div className="flex flex-wrap gap-1">
                     {modelsConfig.available_models.map((model) => (
                       <span
                         key={model}
-                        className="inline-flex items-center px-2 py-1 rounded-md bg-secondary text-secondary-foreground text-xs"
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-secondary text-secondary-foreground text-xs"
                       >
                         {model}
+                        <button
+                          type="button"
+                          onClick={() => removeModel(model)}
+                          className="hover:text-destructive"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
                       </span>
                     ))}
                   </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
             <div>
               <label className="block text-sm font-medium mb-1">模型映射 (JSON)</label>

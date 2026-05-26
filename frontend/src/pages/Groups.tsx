@@ -57,7 +57,7 @@ export function Groups() {
   if (showForm || editingGroup) {
     return (
       <div className="space-y-6">
-        <h1 className="text-3xl font-bold">
+        <h1 className="text-2xl font-bold">
           {editingGroup ? '编辑分组' : '创建分组'}
         </h1>
         <GroupForm
@@ -75,7 +75,7 @@ export function Groups() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">分组管理</h1>
+        <h1 className="text-2xl font-bold">分组管理</h1>
         <Button onClick={() => setShowForm(true)}>
           <Plus className="mr-2 h-4 w-4" />
           添加分组

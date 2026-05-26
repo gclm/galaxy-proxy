@@ -17,6 +17,7 @@ use crate::api::handlers::admin::fetch_models::{self, FetchModelsState};
 use crate::api::handlers::admin::groups::{self, GroupState};
 use crate::api::handlers::admin::pricing::{self, PricingState};
 use crate::api::handlers::admin::stats::{self, StatsApiState};
+use crate::api::handlers::admin::test_model::{self, TestModelState};
 use crate::api::handlers::proxy::{chat, embeddings, images, messages, models, responses};
 use crate::config::QueuingConfig;
 use crate::proxy::ProxyState;
@@ -51,6 +52,13 @@ pub fn create_router(pool: SqlitePool, jwt_secret: String, queuing: &QueuingConf
             .expect("Failed to create HTTP client"),
     };
 
+    let test_model_state = TestModelState {
+        http_client: reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .expect("Failed to create HTTP client"),
+    };
+
     let proxy_state = if queuing.enabled {
         ProxyState::new(pool.clone()).with_queue(queuing.max_queue_size, queuing.queue_timeout_secs)
     } else {
@@ -70,6 +78,8 @@ pub fn create_router(pool: SqlitePool, jwt_secret: String, queuing: &QueuingConf
         .nest("/api/v1/admin/channels", channel_routes(channel_state))
         // 管理 API 路由 - 获取模型列表
         .nest("/api/v1/admin", fetch_models_routes(fetch_models_state))
+        // 管理 API 路由 - 测试模型
+        .nest("/api/v1/admin", test_model_routes(test_model_state))
         // 管理 API 路由 - 分组
         .nest("/api/v1/admin/groups", group_routes(group_state))
         // 管理 API 路由 - API Key
@@ -173,6 +183,13 @@ fn channel_routes(channel_state: ChannelState) -> Router {
 fn fetch_models_routes(state: FetchModelsState) -> Router {
     Router::new()
         .route("/fetch-models", post(fetch_models::fetch_models))
+        .with_state(state)
+}
+
+/// 测试模型路由
+fn test_model_routes(state: TestModelState) -> Router {
+    Router::new()
+        .route("/test-model", post(test_model::test_model))
         .with_state(state)
 }
 

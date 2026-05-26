@@ -87,9 +87,20 @@ export interface UpdateChannelRequest {
 }
 
 export interface FetchModelsRequest {
-  endpoint_type: EndpointType
-  base_url: string
+  endpoints: EndpointConfig[]
   api_key: string
+}
+
+export interface TestModelRequest {
+  endpoint: EndpointConfig
+  api_key: string
+  model: string
+}
+
+export interface TestModelResponse {
+  success: boolean
+  message: string
+  latency_ms: number
 }
 
 // Group types

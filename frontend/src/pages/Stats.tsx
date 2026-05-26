@@ -64,7 +64,7 @@ export function Stats() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">统计分析</h1>
+        <h1 className="text-2xl font-bold">统计分析</h1>
         <div className="flex items-center gap-2">
           {[7, 14, 30, 90].map((d) => (
             <Button

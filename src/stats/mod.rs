@@ -104,7 +104,7 @@ impl StatsState {
                 COALESCE(SUM(request_count), 0),
                 COALESCE(SUM(input_tokens), 0),
                 COALESCE(SUM(output_tokens), 0),
-                COALESCE(SUM(total_cost), 0)
+                COALESCE(CAST(SUM(total_cost) AS REAL), 0.0)
             FROM usage_daily",
         )
         .fetch_one(&self.pool)
@@ -116,7 +116,7 @@ impl StatsState {
                 COALESCE(SUM(request_count), 0),
                 COALESCE(SUM(input_tokens), 0),
                 COALESCE(SUM(output_tokens), 0),
-                COALESCE(SUM(total_cost), 0)
+                COALESCE(CAST(SUM(total_cost) AS REAL), 0.0)
             FROM usage_daily
             WHERE date = ?",
         )

@@ -2,14 +2,13 @@ use axum::{extract::State, http::StatusCode, Json};
 use reqwest::Client;
 use serde::Deserialize;
 
-use crate::api::handlers::admin::channels::EndpointType;
+use crate::api::handlers::admin::channels::{EndpointConfig, EndpointType};
 use crate::api::{ApiError, ApiResponse};
 
 /// 获取模型列表请求
 #[derive(Debug, Deserialize)]
 pub struct FetchModelsRequest {
-    pub endpoint_type: EndpointType,
-    pub base_url: String,
+    pub endpoints: Vec<EndpointConfig>,
     pub api_key: String,
 }
 
@@ -60,26 +59,44 @@ pub async fn fetch_models(
     State(state): State<FetchModelsState>,
     Json(req): Json<FetchModelsRequest>,
 ) -> Result<Json<ApiResponse<Vec<String>>>, (StatusCode, Json<ApiError>)> {
-    let result = match req.endpoint_type {
-        EndpointType::Anthropic => {
-            fetch_anthropic_models(&state.http_client, &req.base_url, &req.api_key).await
-        }
-        EndpointType::Gemini => {
-            fetch_gemini_models(&state.http_client, &req.base_url, &req.api_key).await
-        }
-        _ => fetch_openai_models(&state.http_client, &req.base_url, &req.api_key).await,
-    };
+    if req.endpoints.is_empty() {
+        return Err(ApiError::bad_request("至少需要一个端点"));
+    }
 
-    match result {
-        Ok(models) => Ok(Json(ApiResponse::success(models))),
-        Err(FetchError::AuthFailed) => Err(ApiError::bad_request("API Key 无效")),
-        Err(FetchError::Http(status)) => {
-            let msg = format!("上游返回 HTTP {}", status);
+    let mut last_error = None;
+
+    for endpoint in &req.endpoints {
+        let result = match endpoint.endpoint_type {
+            EndpointType::Anthropic => {
+                fetch_anthropic_models(&state.http_client, &endpoint.base_url, &req.api_key).await
+            }
+            EndpointType::Gemini => {
+                fetch_gemini_models(&state.http_client, &endpoint.base_url, &req.api_key).await
+            }
+            _ => fetch_openai_models(&state.http_client, &endpoint.base_url, &req.api_key).await,
+        };
+
+        match result {
+            Ok(models) => return Ok(Json(ApiResponse::success(models))),
+            Err(FetchError::AuthFailed) => {
+                return Err(ApiError::bad_request("API Key 无效"));
+            }
+            Err(e) => {
+                last_error = Some(e);
+                continue;
+            }
+        }
+    }
+
+    match last_error {
+        Some(FetchError::Http(status)) => {
+            let msg = format!("所有端点均失败，最后错误: HTTP {}", status);
             Err(ApiError::internal_error(msg))
         }
-        Err(FetchError::Other(e)) => {
+        Some(FetchError::Other(e)) => {
             Err(ApiError::internal_error(format!("获取模型列表失败: {}", e)))
         }
+        _ => Err(ApiError::internal_error("所有端点均失败")),
     }
 }
 

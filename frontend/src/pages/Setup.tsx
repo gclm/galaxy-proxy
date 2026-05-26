@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/stores/auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -13,7 +12,6 @@ export function Setup() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const { setup } = useAuthStore()
-  const navigate = useNavigate()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -37,7 +35,7 @@ export function Setup() {
     setLoading(true)
     try {
       await setup(username, password, siteTitle)
-      navigate('/')
+      window.location.href = '/'
     } catch (err) {
       setError(err instanceof Error ? err.message : '初始化失败')
     } finally {

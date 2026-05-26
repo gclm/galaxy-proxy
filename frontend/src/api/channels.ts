@@ -3,6 +3,8 @@ import type {
   Channel,
   CreateChannelRequest,
   FetchModelsRequest,
+  TestModelRequest,
+  TestModelResponse,
   UpdateChannelRequest,
 } from './types'
 
@@ -21,4 +23,7 @@ export const channelsApi = {
 
   fetchModels: (data: FetchModelsRequest) =>
     apiClient.post<string[]>('/fetch-models', data),
+
+  testModel: (data: TestModelRequest) =>
+    apiClient.post<TestModelResponse>('/test-model', data),
 }
