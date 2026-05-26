@@ -140,4 +140,4 @@ make watch
 
 ## 许可证
 
-MIT
+[Apache License 2.0](LICENSE)
