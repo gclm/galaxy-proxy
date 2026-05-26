@@ -224,7 +224,7 @@ mod static_assets {
     use rust_embed::Embed;
 
     #[derive(Embed)]
-    #[folder = concat!(env!("CARGO_MANIFEST_DIR"), "/static_dist/")]
+    #[folder = "static_dist/"]
     pub struct StaticAssets;
 
     use axum::{
