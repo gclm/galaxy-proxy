@@ -39,12 +39,17 @@ export interface EndpointConfig {
   base_url: string
 }
 
+export interface ModelsConfig {
+  available_models: string[]
+  model_maps: Record<string, string>
+}
+
 export interface Channel {
   id: string
   name: string
   api_keys: string[]
   endpoints: EndpointConfig[]
-  model_maps: Record<string, string> | null
+  models: ModelsConfig | null
   rate_limit_rpm: number | null
   rate_limit_tpm: number | null
   failure_threshold: number
@@ -59,7 +64,7 @@ export interface CreateChannelRequest {
   name: string
   api_keys: string[]
   endpoints: EndpointConfig[]
-  model_maps?: Record<string, string>
+  models?: ModelsConfig
   rate_limit_rpm?: number
   rate_limit_tpm?: number
   failure_threshold?: number
@@ -72,13 +77,19 @@ export interface UpdateChannelRequest {
   name?: string
   api_keys?: string[]
   endpoints?: EndpointConfig[]
-  model_maps?: Record<string, string>
+  models?: ModelsConfig
   rate_limit_rpm?: number
   rate_limit_tpm?: number
   failure_threshold?: number
   blacklist_minutes?: number
   concurrency?: number
   enabled?: boolean
+}
+
+export interface FetchModelsRequest {
+  endpoint_type: EndpointType
+  base_url: string
+  api_key: string
 }
 
 // Group types

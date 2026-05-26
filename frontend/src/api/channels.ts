@@ -2,6 +2,7 @@ import { apiClient } from './client'
 import type {
   Channel,
   CreateChannelRequest,
+  FetchModelsRequest,
   UpdateChannelRequest,
 } from './types'
 
@@ -17,4 +18,7 @@ export const channelsApi = {
     apiClient.put<Channel>(`/channels/${id}`, data),
 
   delete: (id: string) => apiClient.delete<void>(`/channels/${id}`),
+
+  fetchModels: (data: FetchModelsRequest) =>
+    apiClient.post<string[]>('/fetch-models', data),
 }

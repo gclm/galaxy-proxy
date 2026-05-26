@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import type { Channel, CreateChannelRequest, EndpointConfig, EndpointType } from '@/api/types'
+import type { Channel, CreateChannelRequest, EndpointConfig, EndpointType, ModelsConfig } from '@/api/types'
+import { channelsApi } from '@/api/channels'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, RefreshCw } from 'lucide-react'
 
 interface ChannelFormProps {
   channel?: Channel
@@ -34,8 +35,11 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
   const [endpoints, setEndpoints] = useState<EndpointConfig[]>(
     channel?.endpoints ?? [{ type: 'openai_chat', base_url: '' }]
   )
-  const [modelMaps, setModelMaps] = useState(
-    channel?.model_maps ? JSON.stringify(channel.model_maps, null, 2) : ''
+  const [modelsConfig, setModelsConfig] = useState<ModelsConfig>(
+    channel?.models ?? { available_models: [], model_maps: {} }
+  )
+  const [modelMapsText, setModelMapsText] = useState(
+    channel?.models?.model_maps ? JSON.stringify(channel.models.model_maps, null, 2) : ''
   )
   const [rateLimitRpm, setRateLimitRpm] = useState(channel?.rate_limit_rpm?.toString() ?? '')
   const [rateLimitTpm, setRateLimitTpm] = useState(channel?.rate_limit_tpm?.toString() ?? '')
@@ -44,6 +48,34 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
   const [concurrency, setConcurrency] = useState(channel?.concurrency?.toString() ?? '10')
   const [enabled, setEnabled] = useState(channel?.enabled ?? true)
   const [submitting, setSubmitting] = useState(false)
+  const [fetchingModels, setFetchingModels] = useState(false)
+
+  const handleFetchModels = async () => {
+    const endpoint = endpoints[0]
+    const apiKey = apiKeys[0]
+
+    if (!endpoint?.base_url || !apiKey) {
+      alert('请先填写端点地址和 API Key')
+      return
+    }
+
+    setFetchingModels(true)
+    try {
+      const models = await channelsApi.fetchModels({
+        endpoint_type: endpoint.type,
+        base_url: endpoint.base_url,
+        api_key: apiKey,
+      })
+      setModelsConfig(prev => ({
+        ...prev,
+        available_models: models,
+      }))
+    } catch (error: any) {
+      alert(`获取模型失败: ${error.response?.data?.message || error.message}`)
+    } finally {
+      setFetchingModels(false)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -63,13 +95,21 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
       if (rateLimitRpm) data.rate_limit_rpm = parseInt(rateLimitRpm)
       if (rateLimitTpm) data.rate_limit_tpm = parseInt(rateLimitTpm)
 
-      if (modelMaps.trim()) {
+      // 解析 model_maps
+      let modelMaps: Record<string, string> = {}
+      if (modelMapsText.trim()) {
         try {
-          data.model_maps = JSON.parse(modelMaps)
+          modelMaps = JSON.parse(modelMapsText)
         } catch {
-          alert('model_maps JSON 格式错误')
+          alert('模型映射 JSON 格式错误')
           return
         }
+      }
+
+      // 构建 models 配置
+      data.models = {
+        available_models: modelsConfig.available_models,
+        model_maps: modelMaps,
       }
 
       await onSubmit(data)
@@ -187,6 +227,56 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
           </div>
 
           <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-medium">模型配置</h3>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleFetchModels}
+                disabled={fetchingModels}
+              >
+                <RefreshCw className={`h-4 w-4 mr-1 ${fetchingModels ? 'animate-spin' : ''}`} />
+                {fetchingModels ? '获取中...' : '获取模型'}
+              </Button>
+            </div>
+
+            {modelsConfig.available_models.length > 0 && (
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  可用模型 ({modelsConfig.available_models.length})
+                </label>
+                <div className="max-h-40 overflow-y-auto rounded-md border border-input bg-background p-2 text-sm">
+                  <div className="flex flex-wrap gap-1">
+                    {modelsConfig.available_models.map((model) => (
+                      <span
+                        key={model}
+                        className="inline-flex items-center px-2 py-1 rounded-md bg-secondary text-secondary-foreground text-xs"
+                      >
+                        {model}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-medium mb-1">模型映射 (JSON)</label>
+              <textarea
+                value={modelMapsText}
+                onChange={(e) => setModelMapsText(e.target.value)}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
+                rows={4}
+                placeholder={'{\n  "gpt-4": "gpt-4-turbo"\n}'}
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                将请求的模型名映射到实际上游模型名
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
             <h3 className="text-sm font-medium">高级配置</h3>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -236,17 +326,6 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
                   className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                 />
               </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">模型映射 (JSON)</label>
-              <textarea
-                value={modelMaps}
-                onChange={(e) => setModelMaps(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
-                rows={4}
-                placeholder={'{\n  "gpt-4": "gpt-4-turbo"\n}'}
-              />
             </div>
           </div>
 

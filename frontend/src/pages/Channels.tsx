@@ -120,6 +120,12 @@ export function Channels() {
                   <span className="font-medium text-foreground">API Keys:</span>{' '}
                   {channel.api_keys.length} 个
                 </div>
+                {channel.models?.available_models && channel.models.available_models.length > 0 && (
+                  <div>
+                    <span className="font-medium text-foreground">模型:</span>{' '}
+                    {channel.models.available_models.length} 个
+                  </div>
+                )}
                 {channel.rate_limit_rpm && (
                   <div>
                     <span className="font-medium text-foreground">RPM 限制:</span>{' '}
