@@ -11,6 +11,7 @@ mod config;
 mod db;
 mod protocol;
 mod proxy;
+mod static_assets;
 mod stats;
 
 use config::AppConfig;

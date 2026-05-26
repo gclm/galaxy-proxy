@@ -3,6 +3,23 @@ import { statsApi } from '@/api'
 import type { DailyStats, ModelStats, ChannelStats } from '@/api/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  CartesianGrid,
+  PieChart,
+  Pie,
+  Cell,
+  Legend,
+} from 'recharts'
+
+const COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#0088fe', '#00C49F']
 
 export function Stats() {
   const [daily, setDaily] = useState<DailyStats[]>([])
@@ -33,9 +50,16 @@ export function Stats() {
     }
   }
 
+  const formatNumber = (n: number | undefined) => (n ?? 0).toLocaleString()
+  const formatCost = (n: number | undefined) => (n ?? 0).toFixed(4)
+
   if (loading) {
     return <div className="flex items-center justify-center h-full">加载中...</div>
   }
+
+  const totalRequests = daily.reduce((sum, d) => sum + d.requests, 0)
+  const totalTokens = daily.reduce((sum, d) => sum + d.tokens, 0)
+  const totalCost = daily.reduce((sum, d) => sum + d.cost, 0)
 
   return (
     <div className="space-y-6">
@@ -55,82 +79,137 @@ export function Stats() {
         </div>
       </div>
 
+      {/* 总览卡片 */}
+      <div className="grid gap-4 md:grid-cols-4">
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-2xl font-bold">{formatNumber(totalRequests)}</div>
+            <div className="text-sm text-muted-foreground">总请求数</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-2xl font-bold">{formatNumber(totalTokens)}</div>
+            <div className="text-sm text-muted-foreground">总 Token 数</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-2xl font-bold">${formatCost(totalCost)}</div>
+            <div className="text-sm text-muted-foreground">总成本</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-2xl font-bold">{daily.length}</div>
+            <div className="text-sm text-muted-foreground">有数据的天数</div>
+          </CardContent>
+        </Card>
+      </div>
+
       <div className="grid gap-4 md:grid-cols-2">
+        {/* 每日趋势 */}
         <Card>
           <CardHeader>
-            <CardTitle>每日趋势</CardTitle>
+            <CardTitle>每日请求趋势</CardTitle>
           </CardHeader>
           <CardContent>
             {daily.length > 0 ? (
-              <div className="space-y-2">
-                {daily.slice(-7).map((item) => (
-                  <div
-                    key={item.date}
-                    className="flex items-center justify-between text-sm"
-                  >
-                    <span className="text-muted-foreground">{item.date}</span>
-                    <span className="font-medium">
-                      {item.requests.toLocaleString()} 请求
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={daily}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                  <YAxis />
+                  <Tooltip formatter={(value) => formatNumber(value as number)} />
+                  <Line type="monotone" dataKey="requests" stroke="#8884d8" name="请求数" />
+                </LineChart>
+              </ResponsiveContainer>
             ) : (
-              <p className="text-muted-foreground">暂无数据</p>
+              <div className="flex h-[300px] items-center justify-center text-muted-foreground">
+                暂无数据
+              </div>
             )}
           </CardContent>
         </Card>
 
+        {/* 模型统计 */}
         <Card>
           <CardHeader>
             <CardTitle>模型统计</CardTitle>
           </CardHeader>
           <CardContent>
             {models.length > 0 ? (
-              <div className="space-y-2">
-                {models.slice(0, 5).map((item) => (
-                  <div
-                    key={item.model}
-                    className="flex items-center justify-between text-sm"
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={models.slice(0, 6)}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    outerRadius={100}
+                    fill="#8884d8"
+                    dataKey="requests"
                   >
-                    <span className="text-muted-foreground truncate max-w-[200px]">
-                      {item.model}
-                    </span>
-                    <span className="font-medium">
-                      {item.requests.toLocaleString()} 请求
-                    </span>
-                  </div>
-                ))}
-              </div>
+                    {models.slice(0, 6).map((_, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value) => formatNumber(value as number)} />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
             ) : (
-              <p className="text-muted-foreground">暂无数据</p>
+              <div className="flex h-[300px] items-center justify-center text-muted-foreground">
+                暂无数据
+              </div>
             )}
           </CardContent>
         </Card>
 
+        {/* 渠道统计 */}
         <Card>
           <CardHeader>
-            <CardTitle>渠道统计</CardTitle>
+            <CardTitle>渠道请求量</CardTitle>
           </CardHeader>
           <CardContent>
             {channels.length > 0 ? (
-              <div className="space-y-2">
-                {channels.slice(0, 5).map((item) => (
-                  <div
-                    key={item.channel_id}
-                    className="flex items-center justify-between text-sm"
-                  >
-                    <span className="text-muted-foreground">
-                      {item.channel_name}
-                    </span>
-                    <span className="font-medium">
-                      {item.requests.toLocaleString()} 请求
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={channels.slice(0, 10)}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="channel_name" tick={{ fontSize: 10 }} />
+                  <YAxis />
+                  <Tooltip formatter={(value) => formatNumber(value as number)} />
+                  <Bar dataKey="requests" fill="#82ca9d" name="请求数" />
+                </BarChart>
+              </ResponsiveContainer>
             ) : (
-              <p className="text-muted-foreground">暂无数据</p>
+              <div className="flex h-[300px] items-center justify-center text-muted-foreground">
+                暂无数据
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* 每日成本 */}
+        <Card>
+          <CardHeader>
+            <CardTitle>每日成本</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {daily.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={daily}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                  <YAxis />
+                  <Tooltip formatter={(value) => `$${formatCost(value as number)}`} />
+                  <Bar dataKey="cost" fill="#ffc658" name="成本" />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex h-[300px] items-center justify-center text-muted-foreground">
+                暂无数据
+              </div>
             )}
           </CardContent>
         </Card>
