@@ -7,6 +7,8 @@ mod api;
 mod auth;
 mod config;
 mod db;
+mod protocol;
+mod proxy;
 
 use auth::JwtService;
 use config::AppConfig;

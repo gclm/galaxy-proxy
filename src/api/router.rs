@@ -7,6 +7,8 @@ use crate::api::handlers::admin::api_keys::{self, ApiKeyState};
 use crate::api::handlers::admin::auth::{self, AuthState};
 use crate::api::handlers::admin::channels::{self, ChannelState};
 use crate::api::handlers::admin::groups::{self, GroupState};
+use crate::api::handlers::proxy::{chat, responses, messages, models};
+use crate::proxy::ProxyState;
 
 /// 创建应用路由
 pub fn create_router(pool: SqlitePool, jwt_secret: String) -> Router {
@@ -27,11 +29,13 @@ pub fn create_router(pool: SqlitePool, jwt_secret: String) -> Router {
         pool: pool.clone(),
     };
 
+    let proxy_state = ProxyState::new(pool.clone());
+
     Router::new()
         // 健康检查
         .route("/health", get(health_check))
-        // 代理 API 路由占位
-        .nest("/v1", proxy_routes())
+        // 代理 API 路由
+        .nest("/v1", proxy_routes(proxy_state, pool.clone()))
         // 管理 API 路由 - 认证
         .nest("/api/v1/admin/auth", auth_routes(auth_state))
         // 管理 API 路由 - 渠道
@@ -61,9 +65,14 @@ async fn health_check() -> Json<Value> {
 }
 
 /// 代理 API 路由
-fn proxy_routes() -> Router {
+fn proxy_routes(proxy_state: ProxyState, pool: SqlitePool) -> Router {
     Router::new()
-        // TODO: 添加代理路由
+        .route("/chat/completions", post(chat::proxy))
+        .route("/responses", post(responses::proxy))
+        .route("/messages", post(messages::proxy))
+        .with_state(proxy_state)
+        .route("/models", get(models::list))
+        .with_state(pool)
 }
 
 /// 认证路由
