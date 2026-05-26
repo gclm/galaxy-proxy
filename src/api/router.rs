@@ -8,7 +8,7 @@ use crate::api::handlers::admin::auth::{self, AuthState};
 use crate::api::handlers::admin::channels::{self, ChannelState};
 use crate::api::handlers::admin::groups::{self, GroupState};
 use crate::api::handlers::admin::stats::{self, StatsApiState};
-use crate::api::handlers::proxy::{chat, responses, messages, models};
+use crate::api::handlers::proxy::{chat, embeddings, images, messages, models, responses};
 use crate::proxy::ProxyState;
 use crate::stats::StatsState;
 
@@ -78,6 +78,8 @@ fn proxy_routes(proxy_state: ProxyState, pool: SqlitePool) -> Router {
         .route("/chat/completions", post(chat::proxy))
         .route("/responses", post(responses::proxy))
         .route("/messages", post(messages::proxy))
+        .route("/embeddings", post(embeddings::proxy))
+        .route("/images/generations", post(images::proxy))
         .with_state(proxy_state)
         .route("/models", get(models::list))
         .with_state(pool)
