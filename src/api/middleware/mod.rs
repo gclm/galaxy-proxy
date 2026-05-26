@@ -1,4 +1,7 @@
 use std::future::Future;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 use axum::{
     extract::FromRequestParts,
@@ -11,6 +14,57 @@ use axum_extra::{
 };
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
+
+/// API Key 缓存
+#[derive(Clone)]
+pub struct ApiKeyCache {
+    keys: Arc<RwLock<HashMap<String, ApiKeyEntry>>>,
+}
+
+#[derive(Clone)]
+struct ApiKeyEntry {
+    id: String,
+    name: String,
+    enabled: bool,
+}
+
+impl ApiKeyCache {
+    pub fn new() -> Self {
+        Self {
+            keys: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// 获取缓存的 API Key
+    async fn get(&self, key: &str) -> Option<(String, String, bool)> {
+        let cache = self.keys.read().await;
+        cache.get(key).map(|e| (e.id.clone(), e.name.clone(), e.enabled))
+    }
+
+    /// 设置 API Key 缓存
+    async fn set(&self, key: String, id: String, name: String, enabled: bool) {
+        let mut cache = self.keys.write().await;
+        // 限制缓存大小
+        if cache.len() >= 1000 {
+            if let Some(oldest_key) = cache.keys().next().cloned() {
+                cache.remove(&oldest_key);
+            }
+        }
+        cache.insert(key, ApiKeyEntry { id, name, enabled });
+    }
+
+    /// 清除缓存
+    pub async fn invalidate(&self, key: &str) {
+        let mut cache = self.keys.write().await;
+        cache.remove(key);
+    }
+
+    /// 清除所有缓存
+    pub async fn invalidate_all(&self) {
+        let mut cache = self.keys.write().await;
+        cache.clear();
+    }
+}
 
 /// JWT Claims
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -86,7 +140,24 @@ impl<S: Send + Sync> FromRequestParts<S> for ApiKeyAuth {
                     )
                 })?;
 
-            // 从 extensions 获取数据库连接池
+            let api_key = bearer.token();
+
+            // 1. 检查缓存
+            if let Some(cache) = parts.extensions.get::<ApiKeyCache>() {
+                if let Some((id, name, enabled)) = cache.get(api_key).await {
+                    if !enabled {
+                        return Err((
+                            StatusCode::FORBIDDEN,
+                            axum::Json(serde_json::json!({
+                                "error": { "message": "API Key 已禁用", "type": "authentication_error" }
+                            })),
+                        ));
+                    }
+                    return Ok(ApiKeyAuth { key_id: id, key_name: name });
+                }
+            }
+
+            // 2. 缓存未命中，查询数据库
             let pool = parts.extensions.get::<SqlitePool>().ok_or_else(|| {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -96,8 +167,6 @@ impl<S: Send + Sync> FromRequestParts<S> for ApiKeyAuth {
                 )
             })?;
 
-            // 查询 API Key
-            let api_key = bearer.token();
             let result = sqlx::query_as::<_, (String, String, bool)>(
                 "SELECT id, name, enabled FROM api_keys WHERE api_key = ?",
             )
@@ -115,6 +184,10 @@ impl<S: Send + Sync> FromRequestParts<S> for ApiKeyAuth {
 
             match result {
                 Some((id, name, enabled)) => {
+                    // 3. 写入缓存
+                    if let Some(cache) = parts.extensions.get::<ApiKeyCache>() {
+                        cache.set(api_key.to_string(), id.clone(), name.clone(), enabled).await;
+                    }
                     if !enabled {
                         return Err((
                             StatusCode::FORBIDDEN,
@@ -123,10 +196,7 @@ impl<S: Send + Sync> FromRequestParts<S> for ApiKeyAuth {
                             })),
                         ));
                     }
-                    Ok(ApiKeyAuth {
-                        key_id: id,
-                        key_name: name,
-                    })
+                    Ok(ApiKeyAuth { key_id: id, key_name: name })
                 }
                 None => Err((
                     StatusCode::UNAUTHORIZED,

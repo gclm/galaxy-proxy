@@ -86,8 +86,10 @@ async fn health_check() -> Json<Value> {
 
 /// 代理 API 路由
 fn proxy_routes(proxy_state: ProxyState, pool: SqlitePool) -> Router {
-    // 注入 SqlitePool 到 extensions 供 ApiKeyAuth 使用
+    use crate::api::middleware::ApiKeyCache;
+
     let pool_clone = pool.clone();
+    let api_key_cache = ApiKeyCache::new();
 
     Router::new()
         .route("/chat/completions", post(chat::proxy))
@@ -100,8 +102,10 @@ fn proxy_routes(proxy_state: ProxyState, pool: SqlitePool) -> Router {
         .with_state(pool)
         .layer(middleware::from_fn(move |mut req: axum::http::Request<axum::body::Body>, next: middleware::Next| {
             let pool = pool_clone.clone();
+            let cache = api_key_cache.clone();
             async move {
                 req.extensions_mut().insert(pool);
+                req.extensions_mut().insert(cache);
                 next.run(req).await
             }
         }))
