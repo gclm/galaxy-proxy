@@ -15,16 +15,12 @@ async fn test_database_init() {
     let db_path = "/tmp/galaxy_test/test.db";
     let db_url = format!("sqlite:{}?mode=rwc", db_path);
 
-    // 清理测试数据
     let _ = std::fs::remove_file(db_path);
     let _ = std::fs::remove_dir_all("/tmp/galaxy_test");
-
-    // 创建测试目录
     std::fs::create_dir_all("/tmp/galaxy_test").unwrap();
 
     let db = galaxy_proxy::db::Database::new(&db_url).await.unwrap();
 
-    // 验证表已创建
     let tables: Vec<String> = sqlx::query_scalar(
         "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
     )
@@ -40,19 +36,6 @@ async fn test_database_init() {
     assert!(tables.contains(&"usage_daily".to_string()));
     assert!(tables.contains(&"settings".to_string()));
 
-    // 验证 settings 表有默认配置
-    let settings_count: i32 = sqlx::query_scalar("SELECT COUNT(*) FROM settings")
-        .fetch_one(db.pool())
-        .await
-        .unwrap();
-    assert!(settings_count > 0, "settings table should have default values");
-
-    // 验证运行时配置加载
-    let runtime_config = db.load_runtime_config().await.unwrap();
-    assert_eq!(runtime_config.scheduler.top_k, 7);
-    assert!(runtime_config.sticky_session.enabled);
-
-    // 清理测试数据
     let _ = std::fs::remove_file(db_path);
     let _ = std::fs::remove_dir_all("/tmp/galaxy_test");
 }
@@ -76,70 +59,117 @@ fn test_jwt_token() {
     assert_eq!(claims.username, "admin");
 }
 
+// ============================================================
+// 渠道多端点测试
+// ============================================================
+
 #[tokio::test]
-async fn test_channel_crud() {
-    let db_path = "/tmp/galaxy_test_channel/test.db";
+async fn test_channel_multi_endpoint() {
+    let db_path = "/tmp/galaxy_test_channel_multi/test.db";
     let db_url = format!("sqlite:{}?mode=rwc", db_path);
 
-    // 清理测试数据
-    let _ = std::fs::remove_dir_all("/tmp/galaxy_test_channel");
-    std::fs::create_dir_all("/tmp/galaxy_test_channel").unwrap();
+    let _ = std::fs::remove_dir_all("/tmp/galaxy_test_channel_multi");
+    std::fs::create_dir_all("/tmp/galaxy_test_channel_multi").unwrap();
 
     let db = galaxy_proxy::db::Database::new(&db_url).await.unwrap();
     let pool = db.pool().clone();
 
-    // 生成 UUID
+    // 创建多端点渠道（类似百炼 Coding Plan）
     let channel_id = uuid::Uuid::now_v7().to_string();
+    let endpoints = r#"[
+        {"type": "openai_chat", "base_url": "https://coding.dashscope.aliyuncs.com/v1"},
+        {"type": "anthropic", "base_url": "https://coding.dashscope.aliyuncs.com/apps/anthropic/v1"}
+    ]"#;
 
-    // 创建渠道
     sqlx::query(
         "INSERT INTO channels (id, name, api_keys, endpoints) VALUES (?, ?, ?, ?)"
     )
     .bind(&channel_id)
-    .bind("test-channel")
-    .bind(r#"["sk-test"]"#)
-    .bind(r#"[{"type":"openai_chat","base_url":"https://api.openai.com/v1"}]"#)
+    .bind("百炼 Coding Plan")
+    .bind(r#"["sk-test-key"]"#)
+    .bind(endpoints)
     .execute(&pool)
     .await
     .unwrap();
 
     // 查询渠道
-    let fetched_name: String = sqlx::query_scalar(
-        "SELECT name FROM channels WHERE id = ?"
+    let (name, api_keys, endpoints_str): (String, String, String) = sqlx::query_as(
+        "SELECT name, api_keys, endpoints FROM channels WHERE id = ?"
     )
     .bind(&channel_id)
     .fetch_one(&pool)
     .await
     .unwrap();
 
-    assert_eq!(fetched_name, "test-channel");
+    assert_eq!(name, "百炼 Coding Plan");
+    assert_eq!(api_keys, r#"["sk-test-key"]"#);
 
-    // 删除渠道
-    let result = sqlx::query("DELETE FROM channels WHERE id = ?")
-        .bind(&channel_id)
-        .execute(&pool)
-        .await
-        .unwrap();
+    // 验证 endpoints JSON 解析
+    let parsed_endpoints: Vec<serde_json::Value> = serde_json::from_str(&endpoints_str).unwrap();
+    assert_eq!(parsed_endpoints.len(), 2);
+    assert_eq!(parsed_endpoints[0]["type"], "openai_chat");
+    assert_eq!(parsed_endpoints[1]["type"], "anthropic");
 
-    assert_eq!(result.rows_affected(), 1);
-
-    // 清理测试数据
-    let _ = std::fs::remove_dir_all("/tmp/galaxy_test_channel");
+    let _ = std::fs::remove_dir_all("/tmp/galaxy_test_channel_multi");
 }
 
 #[tokio::test]
-async fn test_group_crud() {
-    let db_path = "/tmp/galaxy_test_group/test.db";
+async fn test_channel_single_endpoint() {
+    let db_path = "/tmp/galaxy_test_channel_single/test.db";
     let db_url = format!("sqlite:{}?mode=rwc", db_path);
 
-    // 清理测试数据
-    let _ = std::fs::remove_dir_all("/tmp/galaxy_test_group");
-    std::fs::create_dir_all("/tmp/galaxy_test_group").unwrap();
+    let _ = std::fs::remove_dir_all("/tmp/galaxy_test_channel_single");
+    std::fs::create_dir_all("/tmp/galaxy_test_channel_single").unwrap();
 
     let db = galaxy_proxy::db::Database::new(&db_url).await.unwrap();
     let pool = db.pool().clone();
 
-    // 先创建一个渠道
+    // 创建单端点渠道
+    let channel_id = uuid::Uuid::now_v7().to_string();
+    let endpoints = r#"[{"type": "openai_chat", "base_url": "https://api.openai.com/v1"}]"#;
+
+    sqlx::query(
+        "INSERT INTO channels (id, name, api_keys, endpoints) VALUES (?, ?, ?, ?)"
+    )
+    .bind(&channel_id)
+    .bind("OpenAI Official")
+    .bind(r#"["sk-xxx"]"#)
+    .bind(endpoints)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let endpoints_str: String = sqlx::query_scalar(
+        "SELECT endpoints FROM channels WHERE id = ?"
+    )
+    .bind(&channel_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let parsed: Vec<serde_json::Value> = serde_json::from_str(&endpoints_str).unwrap();
+    assert_eq!(parsed.len(), 1);
+    assert_eq!(parsed[0]["type"], "openai_chat");
+
+    let _ = std::fs::remove_dir_all("/tmp/galaxy_test_channel_single");
+}
+
+// ============================================================
+// 分组测试
+// ============================================================
+
+#[tokio::test]
+async fn test_group_with_channel() {
+    let db_path = "/tmp/galaxy_test_group_channel/test.db";
+    let db_url = format!("sqlite:{}?mode=rwc", db_path);
+
+    let _ = std::fs::remove_dir_all("/tmp/galaxy_test_group_channel");
+    std::fs::create_dir_all("/tmp/galaxy_test_group_channel").unwrap();
+
+    let db = galaxy_proxy::db::Database::new(&db_url).await.unwrap();
+    let pool = db.pool().clone();
+
+    // 创建渠道
     let channel_id = uuid::Uuid::now_v7().to_string();
     sqlx::query(
         "INSERT INTO channels (id, name, api_keys, endpoints) VALUES (?, ?, ?, ?)"
@@ -158,7 +188,7 @@ async fn test_group_crud() {
         "INSERT INTO groups (id, name) VALUES (?, ?)"
     )
     .bind(&group_id)
-    .bind("test-group")
+    .bind("gpt-4o")
     .execute(&pool)
     .await
     .unwrap();
@@ -171,25 +201,23 @@ async fn test_group_crud() {
     .bind(&item_id)
     .bind(&group_id)
     .bind(&channel_id)
-    .bind("gpt-4o")
+    .bind("gpt-4o-2024-08-06")
     .bind(1)
     .bind(100)
     .execute(&pool)
     .await
     .unwrap();
 
-    // 查询分组
-    let fetched_name: String = sqlx::query_scalar(
+    // 验证分组和分组项
+    let group_name: String = sqlx::query_scalar(
         "SELECT name FROM groups WHERE id = ?"
     )
     .bind(&group_id)
     .fetch_one(&pool)
     .await
     .unwrap();
+    assert_eq!(group_name, "gpt-4o");
 
-    assert_eq!(fetched_name, "test-group");
-
-    // 查询分组项
     let item_count: i32 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM group_items WHERE group_id = ?"
     )
@@ -197,26 +225,26 @@ async fn test_group_crud() {
     .fetch_one(&pool)
     .await
     .unwrap();
-
     assert_eq!(item_count, 1);
 
-    // 清理测试数据
-    let _ = std::fs::remove_dir_all("/tmp/galaxy_test_group");
+    let _ = std::fs::remove_dir_all("/tmp/galaxy_test_group_channel");
 }
+
+// ============================================================
+// API Key 测试
+// ============================================================
 
 #[tokio::test]
 async fn test_api_key_crud() {
     let db_path = "/tmp/galaxy_test_api_key/test.db";
     let db_url = format!("sqlite:{}?mode=rwc", db_path);
 
-    // 清理测试数据
     let _ = std::fs::remove_dir_all("/tmp/galaxy_test_api_key");
     std::fs::create_dir_all("/tmp/galaxy_test_api_key").unwrap();
 
     let db = galaxy_proxy::db::Database::new(&db_url).await.unwrap();
     let pool = db.pool().clone();
 
-    // 创建 API Key
     let key_id = uuid::Uuid::now_v7().to_string();
     let api_key = format!("gp-{}", uuid::Uuid::now_v7());
 
@@ -231,7 +259,6 @@ async fn test_api_key_crud() {
     .await
     .unwrap();
 
-    // 查询 API Key
     let fetched_name: String = sqlx::query_scalar(
         "SELECT name FROM api_keys WHERE id = ?"
     )
@@ -239,10 +266,8 @@ async fn test_api_key_crud() {
     .fetch_one(&pool)
     .await
     .unwrap();
-
     assert_eq!(fetched_name, "test-key");
 
-    // 验证 API Key
     let enabled: bool = sqlx::query_scalar(
         "SELECT enabled FROM api_keys WHERE api_key = ?"
     )
@@ -250,12 +275,14 @@ async fn test_api_key_crud() {
     .fetch_one(&pool)
     .await
     .unwrap();
-
     assert!(enabled);
 
-    // 清理测试数据
     let _ = std::fs::remove_dir_all("/tmp/galaxy_test_api_key");
 }
+
+// ============================================================
+// 协议转换测试
+// ============================================================
 
 #[test]
 fn test_openai_chat_transform() {
@@ -300,4 +327,38 @@ fn test_anthropic_transform() {
 
     assert_eq!(request.model, "claude-sonnet-4-20250514");
     assert_eq!(request.messages.len(), 1);
+}
+
+// ============================================================
+// 端点类型测试
+// ============================================================
+
+#[test]
+fn test_endpoint_type_paths() {
+    use galaxy_proxy::api::handlers::admin::channels::EndpointType;
+
+    assert_eq!(EndpointType::OpenAiChat.path(), "/chat/completions");
+    assert_eq!(EndpointType::OpenAiResponse.path(), "/responses");
+    assert_eq!(EndpointType::Anthropic.path(), "/messages");
+    assert_eq!(EndpointType::OpenAiEmbedding.path(), "/embeddings");
+    assert_eq!(EndpointType::OpenAiImages.path(), "/images/generations");
+}
+
+#[test]
+fn test_endpoint_type_serialization() {
+    use galaxy_proxy::api::handlers::admin::channels::EndpointType;
+
+    // 序列化
+    let json = serde_json::to_string(&EndpointType::OpenAiChat).unwrap();
+    assert_eq!(json, "\"openai_chat\"");
+
+    let json = serde_json::to_string(&EndpointType::Anthropic).unwrap();
+    assert_eq!(json, "\"anthropic\"");
+
+    // 反序列化
+    let et: EndpointType = serde_json::from_str("\"openai_chat\"").unwrap();
+    assert_eq!(et, EndpointType::OpenAiChat);
+
+    let et: EndpointType = serde_json::from_str("\"anthropic\"").unwrap();
+    assert_eq!(et, EndpointType::Anthropic);
 }

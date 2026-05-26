@@ -8,11 +8,15 @@ use crate::api::{ApiError, ApiResponse, response::generate_id};
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum EndpointType {
+    #[serde(rename = "openai_chat")]
     OpenAiChat,
+    #[serde(rename = "openai_response")]
     OpenAiResponse,
     Anthropic,
     Gemini,
+    #[serde(rename = "openai_embedding")]
     OpenAiEmbedding,
+    #[serde(rename = "openai_images")]
     OpenAiImages,
 }
 
