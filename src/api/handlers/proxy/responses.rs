@@ -12,7 +12,13 @@ pub async fn proxy(
     let model = body["model"].as_str().unwrap_or("unknown");
     let is_stream = body["stream"].as_bool().unwrap_or(false);
 
-    let selection = match state.select_channel(model).await {
+    // 获取 session_hash
+    let session_hash = headers.get("x-session-hash")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+        .or_else(|| body["session_hash"].as_str().map(|s| s.to_string()));
+
+    let selection = match state.select_channel(model, session_hash.as_deref()).await {
         Ok(s) => s,
         Err(e) => {
             return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({

@@ -1,10 +1,15 @@
+pub mod scheduler;
+pub mod state;
+
 use sqlx::SqlitePool;
+use self::state::LoadBalancerState;
 
 /// 代理状态
 #[derive(Clone)]
 pub struct ProxyState {
     pub pool: SqlitePool,
     pub http_client: reqwest::Client,
+    pub lb_state: LoadBalancerState,
 }
 
 /// 渠道信息
@@ -52,26 +57,45 @@ impl ProxyState {
         Self {
             pool,
             http_client,
+            lb_state: LoadBalancerState::new(),
         }
     }
 
     /// 选择渠道
-    pub async fn select_channel(&self, model: &str) -> Result<SelectionResult, ProxyError> {
-        // 1. 精确匹配分组名
+    pub async fn select_channel(&self, model: &str, session_hash: Option<&str>) -> Result<SelectionResult, ProxyError> {
+        // 1. 检查粘性会话
+        if let Some(hash) = session_hash {
+            if let Some(channel_id) = self.lb_state.get_sticky_session(hash).await {
+                if let Ok(channel) = self.get_channel(&channel_id).await {
+                    let target_model = self.apply_model_mapping(&channel, model);
+                    return Ok(SelectionResult {
+                        channel,
+                        target_model,
+                    });
+                }
+            }
+        }
+
+        // 2. 精确匹配分组名
         let group = self.find_group_by_name(model).await?;
 
-        // 2. 如果没有精确匹配，尝试正则匹配
+        // 3. 如果没有精确匹配，尝试正则匹配
         let group = match group {
             Some(g) => Some(g),
             None => self.find_group_by_regex(model).await?,
         };
 
-        // 3. 如果找到分组，从分组中选择渠道
+        // 4. 如果找到分组，从分组中选择渠道
         if let Some(group) = group {
             let item = self.select_group_item(&group).await?;
             let channel = self.get_channel(&item.channel_id).await?;
 
-            // 4. 应用模型映射
+            // 设置粘性会话
+            if let Some(hash) = session_hash {
+                self.lb_state.set_sticky_session(hash, &channel.id).await;
+            }
+
+            // 应用模型映射
             let target_model = self.apply_model_mapping(&channel, model);
 
             return Ok(SelectionResult {
@@ -82,6 +106,12 @@ impl ProxyState {
 
         // 5. 如果没有分组匹配，尝试直接查找渠道
         let channel = self.find_channel_by_model(model).await?;
+
+        // 设置粘性会话
+        if let Some(hash) = session_hash {
+            self.lb_state.set_sticky_session(hash, &channel.id).await;
+        }
+
         let target_model = self.apply_model_mapping(&channel, model);
 
         Ok(SelectionResult {
@@ -162,8 +192,14 @@ impl ProxyState {
         let mut scored_items: Vec<(f64, &GroupItemInfo)> = Vec::new();
 
         for item in &group.items {
-            let score = self.calculate_channel_score(&item.channel_id, item.weight).await;
-            scored_items.push((score, item));
+            let score = self.lb_state.calculate_score(&item.channel_id, item.weight).await;
+            if score > 0.0 {
+                scored_items.push((score, item));
+            }
+        }
+
+        if scored_items.is_empty() {
+            return Err(ProxyError::NoAvailableChannel("所有渠道都不可用".to_string()));
         }
 
         // 按评分排序
@@ -172,10 +208,6 @@ impl ProxyState {
         // Top-K 加权随机选择（K=3）
         let top_k = 3.min(scored_items.len());
         let top_items = &scored_items[..top_k];
-
-        if top_items.is_empty() {
-            return Err(ProxyError::NoAvailableChannel("没有可用渠道".to_string()));
-        }
 
         // 加权随机选择
         let total_score: f64 = top_items.iter().map(|(score, _)| score).sum();
@@ -195,16 +227,6 @@ impl ProxyState {
         }
 
         Ok(top_items[0].1.clone())
-    }
-
-    /// 计算渠道评分
-    async fn calculate_channel_score(&self, channel_id: &str, weight: i32) -> f64 {
-        // 基础分 = 权重
-        let mut score = weight as f64;
-
-        // 查询渠道状态（简化版，实际应该从数据库读取错误率等）
-        // 这里暂时只使用权重作为评分
-        score
     }
 
     /// 获取渠道信息

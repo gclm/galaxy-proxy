@@ -18,8 +18,14 @@ pub async fn proxy(
     let model = body["model"].as_str().unwrap_or("unknown");
     let is_stream = body["stream"].as_bool().unwrap_or(false);
 
+    // 获取 session_hash（从请求头或 body）
+    let session_hash = headers.get("x-session-hash")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+        .or_else(|| body["session_hash"].as_str().map(|s| s.to_string()));
+
     // 选择渠道
-    let selection = match state.select_channel(model).await {
+    let selection = match state.select_channel(model, session_hash.as_deref()).await {
         Ok(s) => s,
         Err(e) => {
             return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
@@ -43,6 +49,9 @@ pub async fn proxy(
     // 构建 URL
     let url = format!("{}/v1/chat/completions", selection.channel.base_url);
 
+    let start_time = std::time::Instant::now();
+    let channel_id = selection.channel.id.clone();
+
     // 发送请求
     if is_stream {
         // 流式响应
@@ -56,10 +65,17 @@ pub async fn proxy(
                 if !response.status().is_success() {
                     let status = response.status();
                     let body = response.text().await.unwrap_or_default();
+
+                    // 记录失败
+                    state.lb_state.record_failure(&channel_id, status.is_server_error()).await;
+
                     return (status, Json(serde_json::json!({
                         "error": { "message": body, "type": "server_error" }
                     }))).into_response();
                 }
+
+                // 记录成功（流式请求在开始时记录）
+                state.lb_state.record_success(&channel_id, start_time.elapsed().as_millis() as f64).await;
 
                 // 流式转发
                 let stream = response.bytes_stream();
@@ -110,6 +126,9 @@ pub async fn proxy(
                     .into_response()
             }
             Err(e) => {
+                // 记录失败
+                state.lb_state.record_failure(&channel_id, true).await;
+
                 (StatusCode::BAD_GATEWAY, Json(serde_json::json!({
                     "error": { "message": format!("请求上游失败: {}", e), "type": "server_error" }
                 }))).into_response()
@@ -128,15 +147,24 @@ pub async fn proxy(
                 let body = response.text().await.unwrap_or_default();
 
                 if !status.is_success() {
+                    // 记录失败
+                    state.lb_state.record_failure(&channel_id, status.is_server_error()).await;
+
                     return (status, Json(serde_json::json!({
                         "error": { "message": body, "type": "server_error" }
                     }))).into_response();
                 }
 
+                // 记录成功
+                state.lb_state.record_success(&channel_id, start_time.elapsed().as_millis() as f64).await;
+
                 // 直接返回上游响应
                 (StatusCode::OK, axum::response::Html(body)).into_response()
             }
             Err(e) => {
+                // 记录失败
+                state.lb_state.record_failure(&channel_id, true).await;
+
                 (StatusCode::BAD_GATEWAY, Json(serde_json::json!({
                     "error": { "message": format!("请求上游失败: {}", e), "type": "server_error" }
                 }))).into_response()
