@@ -30,3 +30,4 @@ frontend/.vite/
 # 测试数据
 test_data/
 tmp/
+/.claude/
