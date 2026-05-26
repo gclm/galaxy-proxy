@@ -179,8 +179,8 @@ impl Inbound for OpenAiResponsesInbound {
         let mut events = vec![];
 
         if let Some(choice) = event.first_choice() {
-            if let Some(content) = &choice.delta.content {
-                if let Content::Text(text) = content {
+            if let Some(content) = &choice.delta.content
+                && let Content::Text(text) = content {
                     events.push(format!(
                         "event: response.output_text.delta\ndata: {}\n\n",
                         serde_json::json!({
@@ -191,7 +191,6 @@ impl Inbound for OpenAiResponsesInbound {
                         })
                     ));
                 }
-            }
 
             if choice.finish_reason.is_some() {
                 events.push(format!(
@@ -284,8 +283,8 @@ impl Outbound for OpenAiResponsesOutbound {
         let mut messages = vec![];
         if let Some(output) = response["output"].as_array() {
             for item in output {
-                if item["type"] == "message" {
-                    if let Some(content) = item["content"].as_array() {
+                if item["type"] == "message"
+                    && let Some(content) = item["content"].as_array() {
                         let text: String = content
                             .iter()
                             .filter_map(|c| {
@@ -312,7 +311,6 @@ impl Outbound for OpenAiResponsesOutbound {
                             });
                         }
                     }
-                }
             }
         }
 

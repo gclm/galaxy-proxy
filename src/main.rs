@@ -86,14 +86,13 @@ fn ensure_jwt_secret(mut config: AppConfig, config_path: &PathBuf) -> Result<App
         let content = std::fs::read_to_string(config_path)?;
         let mut toml_value: toml::Value = toml::from_str(&content)?;
 
-        if let Some(auth) = toml_value.get_mut("auth") {
-            if let Some(table) = auth.as_table_mut() {
+        if let Some(auth) = toml_value.get_mut("auth")
+            && let Some(table) = auth.as_table_mut() {
                 table.insert(
                     "jwt_secret".to_string(),
                     toml::Value::String(secret.clone()),
                 );
             }
-        }
 
         std::fs::write(config_path, toml::to_string_pretty(&toml_value)?)?;
         config.auth.jwt_secret = secret;

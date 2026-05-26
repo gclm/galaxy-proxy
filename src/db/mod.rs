@@ -36,11 +36,10 @@ impl Database {
     /// 创建数据库连接
     pub async fn new(database_url: &str) -> Result<Self> {
         // 确保数据目录存在
-        if let Some(path) = database_url.strip_prefix("sqlite:") {
-            if let Some(parent) = Path::new(path).parent() {
+        if let Some(path) = database_url.strip_prefix("sqlite:")
+            && let Some(parent) = Path::new(path).parent() {
                 std::fs::create_dir_all(parent)?;
             }
-        }
 
         // 对于文件数据库，使用 sqlite:{path} 格式
         let connect_url = if database_url.starts_with("sqlite:") && !database_url.contains("?") {

@@ -30,11 +30,10 @@ impl StatsAggregator {
             interval.tick().await;
 
             let now = chrono::Utc::now();
-            if now.hour() == 2 && now.minute() < 60 {
-                if let Err(e) = self.aggregate_daily_stats().await {
+            if now.hour() == 2 && now.minute() < 60
+                && let Err(e) = self.aggregate_daily_stats().await {
                     tracing::error!("聚合每日统计失败: {}", e);
                 }
-            }
         }
     }
 

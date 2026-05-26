@@ -70,10 +70,10 @@ impl ProxyState {
         session_hash: Option<&str>,
     ) -> Result<SelectionResult, ProxyError> {
         // 1. 检查粘性会话
-        if let Some(hash) = session_hash {
-            if let Some(channel_id) = self.lb_state.get_sticky_session(hash).await {
-                if let Ok(channel) = self.get_channel(&channel_id).await {
-                    if let Some(endpoint) = channel.find_endpoint(&endpoint_type) {
+        if let Some(hash) = session_hash
+            && let Some(channel_id) = self.lb_state.get_sticky_session(hash).await
+                && let Ok(channel) = self.get_channel(&channel_id).await
+                    && let Some(endpoint) = channel.find_endpoint(&endpoint_type) {
                         let target_model = self.apply_model_mapping(&channel, model);
                         return Ok(SelectionResult {
                             channel,
@@ -81,9 +81,6 @@ impl ProxyState {
                             endpoint,
                         });
                     }
-                }
-            }
-        }
 
         // 2. 精确匹配分组名
         let group = self.find_group_by_name(model).await?;
@@ -166,14 +163,12 @@ impl ProxyState {
         .map_err(|e| ProxyError::DatabaseError(e.to_string()))?;
 
         for (id, name, match_regex) in groups {
-            if let Some(regex) = match_regex {
-                if let Ok(re) = regex::Regex::new(&regex) {
-                    if re.is_match(model) {
+            if let Some(regex) = match_regex
+                && let Ok(re) = regex::Regex::new(&regex)
+                    && re.is_match(model) {
                         let items = self.get_group_items(&id).await?;
                         return Ok(Some(GroupInfo { id, name, items }));
                     }
-                }
-            }
         }
 
         Ok(None)
@@ -337,21 +332,18 @@ impl ProxyState {
     fn apply_model_mapping(&self, channel: &ChannelInfo, model: &str) -> String {
         if let Some(maps) = channel.model_maps.as_object() {
             // 精确匹配
-            if let Some(target) = maps.get(model) {
-                if let Some(target_str) = target.as_str() {
+            if let Some(target) = maps.get(model)
+                && let Some(target_str) = target.as_str() {
                     return target_str.to_string();
                 }
-            }
 
             // 通配符匹配
             for (source, target) in maps {
-                if source.contains('*') || source.contains('?') {
-                    if let Some(target_str) = target.as_str() {
-                        if wildcard_match(source, model) {
+                if (source.contains('*') || source.contains('?'))
+                    && let Some(target_str) = target.as_str()
+                        && wildcard_match(source, model) {
                             return target_str.replace('*', model);
                         }
-                    }
-                }
             }
         }
 

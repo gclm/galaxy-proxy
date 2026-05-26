@@ -183,11 +183,10 @@ impl LoadBalancerState {
     /// 获取粘性会话
     pub async fn get_sticky_session(&self, session_hash: &str) -> Option<String> {
         let sessions = self.sticky_sessions.read().await;
-        if let Some(session) = sessions.get(session_hash) {
-            if Utc::now() < session.expires_at {
+        if let Some(session) = sessions.get(session_hash)
+            && Utc::now() < session.expires_at {
                 return Some(session.channel_id.clone());
             }
-        }
         None
     }
 
@@ -217,16 +216,14 @@ impl LoadBalancerState {
     pub async fn cleanup_expired_blacklists(&self) {
         let mut states = self.channel_states.write().await;
         for (_, status) in states.iter_mut() {
-            if status.is_blacklisted {
-                if let Some(until) = status.blacklist_until {
-                    if Utc::now() >= until {
+            if status.is_blacklisted
+                && let Some(until) = status.blacklist_until
+                    && Utc::now() >= until {
                         status.is_blacklisted = false;
                         status.blacklist_until = None;
                         status.failure_count = 0; // 重置失败计数
                         tracing::info!("渠道 {} 拉黑已过期，恢复正常", status.channel_id);
                     }
-                }
-            }
         }
     }
 }
