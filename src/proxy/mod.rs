@@ -155,7 +155,7 @@ pub struct ChannelInfo {
     pub name: String,
     pub api_keys: Vec<String>,
     pub endpoints: Vec<EndpointConfig>,
-    pub model_maps: serde_json::Value,
+    pub models: serde_json::Value,
 }
 
 /// 分组信息
@@ -453,28 +453,28 @@ impl ProxyState {
 
         // 2. 缓存未命中，查询数据库
         let result = sqlx::query_as::<_, (String, String, String, String, String)>(
-            "SELECT id, name, api_keys, endpoints, model_maps FROM channels WHERE id = ? AND enabled = 1"
+            "SELECT id, name, api_keys, endpoints, models FROM channels WHERE id = ? AND enabled = 1"
         )
         .bind(channel_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| ProxyError::DatabaseError(e.to_string()))?;
 
-        let (id, name, api_keys_str, endpoints_str, model_maps_str) =
+        let (id, name, api_keys_str, endpoints_str, models_str) =
             result.ok_or_else(|| ProxyError::ChannelNotFound("渠道不存在或已禁用".to_string()))?;
 
         let api_keys: Vec<String> = serde_json::from_str(&api_keys_str).unwrap_or_default();
         let endpoints: Vec<EndpointConfig> =
             serde_json::from_str(&endpoints_str).unwrap_or_default();
-        let model_maps: serde_json::Value =
-            serde_json::from_str(&model_maps_str).unwrap_or_default();
+        let models: serde_json::Value =
+            serde_json::from_str(&models_str).unwrap_or_default();
 
         let channel = ChannelInfo {
             id,
             name,
             api_keys,
             endpoints,
-            model_maps,
+            models,
         };
 
         // 3. 写入缓存
@@ -491,13 +491,13 @@ impl ProxyState {
         endpoint_filter: impl Fn(&ChannelInfo) -> bool,
     ) -> Result<ChannelInfo, ProxyError> {
         let channels = sqlx::query_as::<_, (String, String, String, String, String)>(
-            "SELECT id, name, api_keys, endpoints, model_maps FROM channels WHERE enabled = 1",
+            "SELECT id, name, api_keys, endpoints, models FROM channels WHERE enabled = 1",
         )
         .fetch_all(&self.pool)
         .await
         .map_err(|e| ProxyError::DatabaseError(e.to_string()))?;
 
-        for (id, name, api_keys_str, endpoints_str, model_maps_str) in channels {
+        for (id, name, api_keys_str, endpoints_str, models_str) in channels {
             if exclude_ids.contains(&id) {
                 continue;
             }
@@ -505,15 +505,15 @@ impl ProxyState {
             let api_keys: Vec<String> = serde_json::from_str(&api_keys_str).unwrap_or_default();
             let endpoints: Vec<EndpointConfig> =
                 serde_json::from_str(&endpoints_str).unwrap_or_default();
-            let model_maps: serde_json::Value =
-                serde_json::from_str(&model_maps_str).unwrap_or_default();
+            let models: serde_json::Value =
+                serde_json::from_str(&models_str).unwrap_or_default();
 
             if endpoints.is_empty() || !endpoint_filter(&ChannelInfo {
                 id: id.clone(),
                 name: name.clone(),
                 api_keys: api_keys.clone(),
                 endpoints: endpoints.clone(),
-                model_maps: model_maps.clone(),
+                models: models.clone(),
             }) {
                 continue;
             }
@@ -523,10 +523,10 @@ impl ProxyState {
                 name,
                 api_keys,
                 endpoints,
-                model_maps: model_maps.clone(),
+                models: models.clone(),
             };
 
-            if let Some(maps) = model_maps.as_object() {
+            if let Some(maps) = models.as_object() {
                 for (source, _target) in maps {
                     if source == model || source == "*" {
                         return Ok(channel);
@@ -544,7 +544,7 @@ impl ProxyState {
 
     /// 应用模型映射
     fn apply_model_mapping(&self, channel: &ChannelInfo, model: &str) -> String {
-        if let Some(maps) = channel.model_maps.as_object() {
+        if let Some(maps) = channel.models.as_object() {
             // 精确匹配
             if let Some(target) = maps.get(model)
                 && let Some(target_str) = target.as_str() {

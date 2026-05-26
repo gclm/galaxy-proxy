@@ -402,5 +402,12 @@ fn get_migrations() -> Vec<Migration> {
                 ('stats.cost.refresh_interval_hours', 'stats', '24', '成本数据刷新间隔（小时）');
             "#,
         },
+        Migration {
+            version: 10,
+            name: "rename_model_maps_to_models",
+            sql: r#"
+            ALTER TABLE channels RENAME COLUMN model_maps TO models;
+            "#,
+        },
     ]
 }

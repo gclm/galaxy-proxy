@@ -53,7 +53,7 @@ pub struct Channel {
     pub name: String,
     pub api_keys: Vec<String>,
     pub endpoints: Vec<EndpointConfig>,
-    pub model_maps: serde_json::Value,
+    pub models: serde_json::Value,
     pub rate_limit_rpm: Option<i32>,
     pub rate_limit_tpm: Option<i32>,
     pub failure_threshold: i32,
@@ -70,7 +70,7 @@ pub struct CreateChannelRequest {
     pub name: String,
     pub api_keys: Vec<String>,
     pub endpoints: Vec<EndpointConfig>,
-    pub model_maps: Option<serde_json::Value>,
+    pub models: Option<serde_json::Value>,
     pub rate_limit_rpm: Option<i32>,
     pub rate_limit_tpm: Option<i32>,
     pub failure_threshold: Option<i32>,
@@ -85,7 +85,7 @@ pub struct UpdateChannelRequest {
     pub name: Option<String>,
     pub api_keys: Option<Vec<String>>,
     pub endpoints: Option<Vec<EndpointConfig>>,
-    pub model_maps: Option<serde_json::Value>,
+    pub models: Option<serde_json::Value>,
     pub rate_limit_rpm: Option<i32>,
     pub rate_limit_tpm: Option<i32>,
     pub failure_threshold: Option<i32>,
@@ -105,7 +105,7 @@ pub async fn list(
     State(state): State<ChannelState>,
 ) -> Result<Json<ApiResponse<Vec<Channel>>>, (StatusCode, Json<ApiError>)> {
     let channels = sqlx::query_as::<_, (String, String, String, String, String, Option<i32>, Option<i32>, i32, i32, i32, bool, String, String)>(
-        "SELECT id, name, api_keys, endpoints, model_maps, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at FROM channels ORDER BY created_at DESC"
+        "SELECT id, name, api_keys, endpoints, models, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at FROM channels ORDER BY created_at DESC"
     )
     .fetch_all(&state.pool)
     .await
@@ -119,7 +119,7 @@ pub async fn list(
                 name,
                 api_keys_str,
                 endpoints_str,
-                model_maps_str,
+                models_str,
                 rate_limit_rpm,
                 rate_limit_tpm,
                 failure_threshold,
@@ -132,15 +132,15 @@ pub async fn list(
                 let api_keys: Vec<String> = serde_json::from_str(&api_keys_str).unwrap_or_default();
                 let endpoints: Vec<EndpointConfig> =
                     serde_json::from_str(&endpoints_str).unwrap_or_default();
-                let model_maps: serde_json::Value =
-                    serde_json::from_str(&model_maps_str).unwrap_or_default();
+                let models: serde_json::Value =
+                    serde_json::from_str(&models_str).unwrap_or_default();
 
                 Channel {
                     id,
                     name,
                     api_keys,
                     endpoints,
-                    model_maps,
+                    models,
                     rate_limit_rpm,
                     rate_limit_tpm,
                     failure_threshold,
@@ -178,13 +178,13 @@ pub async fn create(
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
     let endpoints_json = serde_json::to_string(&req.endpoints)
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
-    let model_maps_json = serde_json::to_string(&req.model_maps.unwrap_or_default())
+    let models_json = serde_json::to_string(&req.models.unwrap_or_default())
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
     // 插入渠道
     sqlx::query(
         r#"
-        INSERT INTO channels (id, name, api_keys, endpoints, model_maps, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled)
+        INSERT INTO channels (id, name, api_keys, endpoints, models, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#
     )
@@ -192,7 +192,7 @@ pub async fn create(
     .bind(&req.name)
     .bind(&api_keys_json)
     .bind(&endpoints_json)
-    .bind(&model_maps_json)
+    .bind(&models_json)
     .bind(req.rate_limit_rpm)
     .bind(req.rate_limit_tpm)
     .bind(req.failure_threshold.unwrap_or(3))
@@ -256,9 +256,9 @@ pub async fn update(
         updates.push("endpoints = ?");
         values.push(serde_json::to_string(endpoints).unwrap_or_default());
     }
-    if let Some(model_maps) = &req.model_maps {
-        updates.push("model_maps = ?");
-        values.push(serde_json::to_string(model_maps).unwrap_or_default());
+    if let Some(models) = &req.models {
+        updates.push("models = ?");
+        values.push(serde_json::to_string(models).unwrap_or_default());
     }
 
     if updates.is_empty() {
@@ -311,7 +311,7 @@ async fn get_channel_by_id(
     id: &str,
 ) -> Result<Channel, (StatusCode, Json<ApiError>)> {
     let result = sqlx::query_as::<_, (String, String, String, String, String, Option<i32>, Option<i32>, i32, i32, i32, bool, String, String)>(
-        "SELECT id, name, api_keys, endpoints, model_maps, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at FROM channels WHERE id = ?"
+        "SELECT id, name, api_keys, endpoints, models, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at FROM channels WHERE id = ?"
     )
     .bind(id)
     .fetch_optional(pool)
@@ -323,7 +323,7 @@ async fn get_channel_by_id(
         name,
         api_keys_str,
         endpoints_str,
-        model_maps_str,
+        models_str,
         rate_limit_rpm,
         rate_limit_tpm,
         failure_threshold,
@@ -336,14 +336,14 @@ async fn get_channel_by_id(
 
     let api_keys: Vec<String> = serde_json::from_str(&api_keys_str).unwrap_or_default();
     let endpoints: Vec<EndpointConfig> = serde_json::from_str(&endpoints_str).unwrap_or_default();
-    let model_maps: serde_json::Value = serde_json::from_str(&model_maps_str).unwrap_or_default();
+    let models: serde_json::Value = serde_json::from_str(&models_str).unwrap_or_default();
 
     Ok(Channel {
         id,
         name,
         api_keys,
         endpoints,
-        model_maps,
+        models,
         rate_limit_rpm,
         rate_limit_tpm,
         failure_threshold,
