@@ -14,9 +14,10 @@ pub struct AuthState {
 
 /// 初始化请求
 #[derive(Deserialize)]
-pub struct SetupRequest {
+pub struct InitRequest {
     pub username: String,
     pub password: String,
+    pub site_title: Option<String>,
 }
 
 /// 登录请求
@@ -47,19 +48,19 @@ pub struct UserInfoResponse {
     pub username: String,
 }
 
-/// 初始化管理员
-pub async fn setup(
+/// 初始化系统（创建管理员 + 站点配置）
+pub async fn init(
     State(state): State<AuthState>,
-    Json(req): Json<SetupRequest>,
+    Json(req): Json<InitRequest>,
 ) -> Result<(StatusCode, Json<ApiResponse<AuthResponse>>), (StatusCode, Json<ApiError>)> {
-    // 检查是否已有用户
+    // 检查是否已初始化
     let count: i32 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
         .fetch_one(&state.pool)
         .await
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
     if count > 0 {
-        return Err(ApiError::conflict("管理员已存在"));
+        return Err(ApiError::conflict("系统已初始化，无需重复操作"));
     }
 
     // 验证输入
@@ -85,6 +86,17 @@ pub async fn setup(
         .execute(&state.pool)
         .await
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
+
+    // 保存站点标题
+    if let Some(site_title) = &req.site_title {
+        sqlx::query(
+            "INSERT OR REPLACE INTO settings (key, category, value, description) VALUES ('site.title', 'general', ?, '站点标题')",
+        )
+        .bind(site_title)
+        .execute(&state.pool)
+        .await
+        .map_err(|e| ApiError::internal_error(e.to_string()))?;
+    }
 
     // 生成 Token
     let token = state
