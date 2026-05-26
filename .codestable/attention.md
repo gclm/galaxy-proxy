@@ -8,9 +8,11 @@
 
 ### 编译与构建
 
-- `make build` 构建项目
+- `make build` 构建项目（包含前端构建）
+- `make frontend-build` 仅构建前端
 - `make check` 代码检查
 - `make watch` 监听自动构建
+- 前端使用 pnpm，需要先安装依赖：`cd frontend && pnpm install`
 
 ### 运行与本地起服务
 
@@ -49,3 +51,5 @@
 - 数据库迁移: 版本号递增，不可回滚，追加到 `get_migrations()` 函数
 - 代理 API (`/v1/*`) 保持原生协议格式，不用统一响应包装
 - 管理 API (`/api/v1/admin/*`) 使用统一 JSON 响应格式
+- 渠道 `models` 字段结构: `{"available_models": [], "model_maps": {}}`
+- 获取上游模型: `POST /api/v1/admin/fetch-models`（支持 OpenAI/Anthropic/Gemini）

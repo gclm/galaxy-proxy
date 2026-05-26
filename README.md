@@ -64,7 +64,24 @@ POST /api/v1/admin/channels
   "endpoints": [
     {"type": "openai_chat", "base_url": "https://coding.dashscope.aliyuncs.com/v1"},
     {"type": "anthropic", "base_url": "https://coding.dashscope.aliyuncs.com/apps/anthropic/v1"}
-  ]
+  ],
+  "models": {
+    "available_models": ["gpt-4", "gpt-4-turbo"],
+    "model_maps": {"gpt-4": "gpt-4-turbo"}
+  }
+}
+```
+
+### 获取上游模型
+
+调用 `/api/v1/admin/fetch-models` 可从上游获取支持的模型列表：
+
+```json
+POST /api/v1/admin/fetch-models
+{
+  "endpoint_type": "openai_chat",
+  "base_url": "https://api.openai.com/v1",
+  "api_key": "sk-xxx"
 }
 ```
 
@@ -88,6 +105,8 @@ POST /api/v1/admin/channels
 | `/api/v1/admin/auth/setup` | POST | 初始化管理员 |
 | `/api/v1/admin/auth/login` | POST | 登录 |
 | `/api/v1/admin/channels` | GET/POST | 渠道管理 |
+| `/api/v1/admin/channels/{id}` | GET/PUT/DELETE | 渠道详情/更新/删除 |
+| `/api/v1/admin/fetch-models` | POST | 获取上游模型列表 |
 | `/api/v1/admin/groups` | GET/POST | 分组管理 |
 | `/api/v1/admin/api-keys` | GET/POST | API Key 管理 |
 | `/api/v1/admin/stats/overview` | GET | 统计概览 |
