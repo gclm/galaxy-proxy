@@ -1,5 +1,7 @@
 use anyhow::Result;
+use clap::Parser;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -14,25 +16,76 @@ mod stats;
 use config::AppConfig;
 use db::Database;
 
+/// Galaxy Proxy - AI 协议互转代理网关
+#[derive(Parser, Debug)]
+#[command(name = "galaxy-proxy", version, about)]
+struct Cli {
+    /// 配置文件路径
+    #[arg(short, long, default_value = "config.toml")]
+    config: PathBuf,
+
+    /// 监听端口（覆盖配置文件）
+    #[arg(short, long)]
+    port: Option<u16>,
+
+    /// 监听地址（覆盖配置文件）
+    #[arg(long)]
+    host: Option<String>,
+
+    /// 日志级别
+    #[arg(short, long, default_value = "info")]
+    log_level: String,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    let cli = Cli::parse();
+
     // 初始化日志
-    init_logging()?;
+    init_logging(&cli.log_level)?;
 
     // 加载配置
-    let config_path = get_config_path();
-    let config = AppConfig::load(&config_path)?;
-    info!("Configuration loaded from {:?}", config_path);
+    let config = AppConfig::load(&cli.config)?;
+    info!("Configuration loaded from {:?}", cli.config);
+
+    // 应用 CLI 覆盖
+    let config = apply_cli_overrides(config, &cli);
 
     // 初始化数据库
     let database = Database::new(&config.database_url()).await?;
     info!("Database initialized");
 
     // 检查是否需要初始化 JWT 密钥
-    let config = ensure_jwt_secret(config, &config_path)?;
+    let config = ensure_jwt_secret(config, &cli.config)?;
 
-    // 创建路由
-    let app = api::create_router(database.pool().clone(), config.auth.jwt_secret.clone());
+    // 初始化成本计算器并加载定价数据
+    let cost_calculator = stats::cost::CostCalculator::new();
+    if let Err(e) = cost_calculator.load_local_pricing(database.pool()).await {
+        tracing::warn!("加载本地定价数据失败: {}", e);
+    }
+    if let Err(e) = cost_calculator.fetch_remote_pricing().await {
+        tracing::warn!("获取远程定价数据失败: {}", e);
+    }
+    info!("Cost calculator initialized");
+
+    // 启动后台调度器
+    let lb_state = proxy::state::LoadBalancerState::new();
+    let scheduler = Arc::new(proxy::scheduler::Scheduler::new(lb_state));
+    scheduler.start();
+    info!("Scheduler started");
+
+    let aggregator = Arc::new(stats::aggregator::StatsAggregator::new(
+        database.pool().clone(),
+    ));
+    aggregator.start();
+    info!("Stats aggregator started");
+
+    // 创建路由（带排队配置）
+    let app = api::create_router(
+        database.pool().clone(),
+        config.auth.jwt_secret.clone(),
+        &config.queuing,
+    );
 
     // 启动服务器
     let addr = config.server_addr();
@@ -45,8 +98,9 @@ async fn main() -> Result<()> {
 }
 
 /// 初始化日志
-fn init_logging() -> Result<()> {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+fn init_logging(log_level: &str) -> Result<()> {
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(log_level));
 
     fmt()
         .with_env_filter(filter)
@@ -59,15 +113,15 @@ fn init_logging() -> Result<()> {
     Ok(())
 }
 
-/// 获取配置文件路径
-fn get_config_path() -> PathBuf {
-    // 优先使用环境变量
-    if let Ok(path) = std::env::var("GALAXY_PROXY_CONFIG") {
-        return PathBuf::from(path);
+/// 应用 CLI 参数覆盖配置
+fn apply_cli_overrides(mut config: AppConfig, cli: &Cli) -> AppConfig {
+    if let Some(port) = cli.port {
+        config.server.port = port;
     }
-
-    // 默认路径
-    PathBuf::from("config.toml")
+    if let Some(host) = &cli.host {
+        config.server.host = host.clone();
+    }
+    config
 }
 
 /// 确保 JWT 密钥存在

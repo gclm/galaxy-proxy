@@ -9,6 +9,8 @@ pub struct AppConfig {
     pub database: DatabaseConfig,
     pub logging: LoggingConfig,
     pub auth: AuthConfig,
+    #[serde(default)]
+    pub queuing: QueuingConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -34,6 +36,38 @@ pub struct LoggingConfig {
 pub struct AuthConfig {
     pub jwt_secret: String,
     pub token_expiry_hours: u64,
+}
+
+/// 排队配置
+#[derive(Debug, Deserialize, Clone)]
+pub struct QueuingConfig {
+    /// 是否启用排队（默认关闭，直接返回 429）
+    #[serde(default)]
+    pub enabled: bool,
+    /// 最大排队请求数
+    #[serde(default = "default_max_queue_size")]
+    pub max_queue_size: usize,
+    /// 排队超时时间（秒）
+    #[serde(default = "default_queue_timeout_secs")]
+    pub queue_timeout_secs: u64,
+}
+
+impl Default for QueuingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_queue_size: default_max_queue_size(),
+            queue_timeout_secs: default_queue_timeout_secs(),
+        }
+    }
+}
+
+fn default_max_queue_size() -> usize {
+    100
+}
+
+fn default_queue_timeout_secs() -> u64 {
+    30
 }
 
 /// 运行时配置（从数据库加载）

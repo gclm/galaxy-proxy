@@ -233,6 +233,12 @@ impl CostCalculator {
         remote.get(model).cloned()
     }
 
+    /// 设置本地定价
+    pub async fn set_local_pricing(&self, pricing: ModelPricing) {
+        let mut local = self.local_pricing.write().await;
+        local.insert(pricing.model.clone(), pricing);
+    }
+
     /// 获取所有定价
     pub async fn get_all_pricing(&self) -> Vec<ModelPricing> {
         let mut all = Vec::new();

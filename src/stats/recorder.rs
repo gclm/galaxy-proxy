@@ -2,6 +2,7 @@ use crate::api::response::generate_id;
 use sqlx::SqlitePool;
 
 /// 统计记录器
+#[derive(Clone)]
 pub struct StatsRecorder {
     pool: SqlitePool,
 }
