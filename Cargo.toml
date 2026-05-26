@@ -1,7 +1,8 @@
 [package]
 name = "galaxy-proxy"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+license = "Apache-2.0"
 description = "AI 协议互转代理网关"
 
 [dependencies]
@@ -21,7 +22,7 @@ config = "0.15"
 toml = "1"
 
 # 数据库
-sqlx = { version = "0.9", features = ["runtime-tokio", "sqlite", "migrate"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate"] }
 
 # 日志
 tracing = "0.1"
