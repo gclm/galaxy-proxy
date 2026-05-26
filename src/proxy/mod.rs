@@ -3,6 +3,7 @@ pub mod state;
 
 use sqlx::SqlitePool;
 use self::state::LoadBalancerState;
+use crate::api::handlers::admin::channels::{EndpointConfig, EndpointType};
 
 /// 代理状态
 #[derive(Clone)]
@@ -17,9 +18,8 @@ pub struct ProxyState {
 pub struct ChannelInfo {
     pub id: String,
     pub name: String,
-    pub channel_type: String,
-    pub base_url: String,
     pub api_keys: Vec<String>,
+    pub endpoints: Vec<EndpointConfig>,
     pub model_maps: serde_json::Value,
 }
 
@@ -45,6 +45,7 @@ pub struct GroupItemInfo {
 pub struct SelectionResult {
     pub channel: ChannelInfo,
     pub target_model: String,
+    pub endpoint: EndpointConfig,
 }
 
 impl ProxyState {
@@ -61,17 +62,25 @@ impl ProxyState {
         }
     }
 
-    /// 选择渠道
-    pub async fn select_channel(&self, model: &str, session_hash: Option<&str>) -> Result<SelectionResult, ProxyError> {
+    /// 选择渠道和端点
+    pub async fn select_channel(
+        &self,
+        model: &str,
+        endpoint_type: EndpointType,
+        session_hash: Option<&str>,
+    ) -> Result<SelectionResult, ProxyError> {
         // 1. 检查粘性会话
         if let Some(hash) = session_hash {
             if let Some(channel_id) = self.lb_state.get_sticky_session(hash).await {
                 if let Ok(channel) = self.get_channel(&channel_id).await {
-                    let target_model = self.apply_model_mapping(&channel, model);
-                    return Ok(SelectionResult {
-                        channel,
-                        target_model,
-                    });
+                    if let Some(endpoint) = channel.find_endpoint(&endpoint_type) {
+                        let target_model = self.apply_model_mapping(&channel, model);
+                        return Ok(SelectionResult {
+                            channel,
+                            target_model,
+                            endpoint,
+                        });
+                    }
                 }
             }
         }
@@ -90,34 +99,40 @@ impl ProxyState {
             let item = self.select_group_item(&group).await?;
             let channel = self.get_channel(&item.channel_id).await?;
 
+            // 检查渠道是否支持该端点类型
+            if let Some(endpoint) = channel.find_endpoint(&endpoint_type) {
+                // 设置粘性会话
+                if let Some(hash) = session_hash {
+                    self.lb_state.set_sticky_session(hash, &channel.id).await;
+                }
+
+                let target_model = self.apply_model_mapping(&channel, model);
+                return Ok(SelectionResult {
+                    channel,
+                    target_model,
+                    endpoint,
+                });
+            }
+        }
+
+        // 5. 如果没有分组匹配，尝试直接查找渠道
+        let channel = self.find_channel_by_model_and_type(model, &endpoint_type).await?;
+
+        if let Some(endpoint) = channel.find_endpoint(&endpoint_type) {
             // 设置粘性会话
             if let Some(hash) = session_hash {
                 self.lb_state.set_sticky_session(hash, &channel.id).await;
             }
 
-            // 应用模型映射
             let target_model = self.apply_model_mapping(&channel, model);
-
             return Ok(SelectionResult {
                 channel,
                 target_model,
+                endpoint,
             });
         }
 
-        // 5. 如果没有分组匹配，尝试直接查找渠道
-        let channel = self.find_channel_by_model(model).await?;
-
-        // 设置粘性会话
-        if let Some(hash) = session_hash {
-            self.lb_state.set_sticky_session(hash, &channel.id).await;
-        }
-
-        let target_model = self.apply_model_mapping(&channel, model);
-
-        Ok(SelectionResult {
-            channel,
-            target_model,
-        })
+        Err(ProxyError::NoAvailableChannel("没有可用渠道".to_string()))
     }
 
     /// 根据名称查找分组
@@ -232,72 +247,64 @@ impl ProxyState {
     /// 获取渠道信息
     async fn get_channel(&self, channel_id: &str) -> Result<ChannelInfo, ProxyError> {
         let result = sqlx::query_as::<_, (String, String, String, String, String)>(
-            "SELECT id, name, type, base_url, api_keys FROM channels WHERE id = ? AND enabled = 1"
+            "SELECT id, name, api_keys, endpoints, model_maps FROM channels WHERE id = ? AND enabled = 1"
         )
         .bind(channel_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| ProxyError::DatabaseError(e.to_string()))?;
 
-        let (id, name, channel_type, base_url, api_keys_str) =
+        let (id, name, api_keys_str, endpoints_str, model_maps_str) =
             result.ok_or_else(|| ProxyError::ChannelNotFound("渠道不存在或已禁用".to_string()))?;
 
         let api_keys: Vec<String> = serde_json::from_str(&api_keys_str).unwrap_or_default();
-
-        let model_maps: serde_json::Value = sqlx::query_scalar::<_, String>(
-            "SELECT model_maps FROM channels WHERE id = ?"
-        )
-        .bind(channel_id)
-        .fetch_one(&self.pool)
-        .await
-        .map(|s| serde_json::from_str(&s).unwrap_or_default())
-        .unwrap_or_default();
+        let endpoints: Vec<EndpointConfig> = serde_json::from_str(&endpoints_str).unwrap_or_default();
+        let model_maps: serde_json::Value = serde_json::from_str(&model_maps_str).unwrap_or_default();
 
         Ok(ChannelInfo {
             id,
             name,
-            channel_type,
-            base_url,
             api_keys,
+            endpoints,
             model_maps,
         })
     }
 
-    /// 根据模型查找渠道
-    async fn find_channel_by_model(&self, model: &str) -> Result<ChannelInfo, ProxyError> {
-        // 查找支持该模型的渠道
+    /// 根据模型和端点类型查找渠道
+    async fn find_channel_by_model_and_type(
+        &self,
+        model: &str,
+        endpoint_type: &EndpointType,
+    ) -> Result<ChannelInfo, ProxyError> {
         let channels = sqlx::query_as::<_, (String, String, String, String, String)>(
-            "SELECT id, name, type, base_url, api_keys FROM channels WHERE enabled = 1"
+            "SELECT id, name, api_keys, endpoints, model_maps FROM channels WHERE enabled = 1"
         )
         .fetch_all(&self.pool)
         .await
         .map_err(|e| ProxyError::DatabaseError(e.to_string()))?;
 
-        for (id, name, channel_type, base_url, api_keys_str) in channels {
+        for (id, name, api_keys_str, endpoints_str, model_maps_str) in channels {
             let api_keys: Vec<String> = serde_json::from_str(&api_keys_str).unwrap_or_default();
-
-            let model_maps_str: String = sqlx::query_scalar(
-                "SELECT model_maps FROM channels WHERE id = ?"
-            )
-            .bind(&id)
-            .fetch_one(&self.pool)
-            .await
-            .unwrap_or_default();
-
+            let endpoints: Vec<EndpointConfig> = serde_json::from_str(&endpoints_str).unwrap_or_default();
             let model_maps: serde_json::Value = serde_json::from_str(&model_maps_str).unwrap_or_default();
+
+            // 检查是否支持该端点类型
+            let has_endpoint = endpoints.iter().any(|e| e.endpoint_type == *endpoint_type);
+            if !has_endpoint {
+                continue;
+            }
 
             let channel = ChannelInfo {
                 id: id.clone(),
                 name,
-                channel_type,
-                base_url,
                 api_keys,
+                endpoints,
                 model_maps: model_maps.clone(),
             };
 
             // 检查模型映射
             if let Some(maps) = model_maps.as_object() {
-                for (source, target) in maps {
+                for (source, _target) in maps {
                     if source == model || source == "*" {
                         return Ok(channel);
                     }
@@ -347,6 +354,15 @@ impl ProxyState {
         // 简单轮询：使用时间戳取模
         let idx = (chrono::Utc::now().timestamp_millis() as usize) % channel.api_keys.len();
         channel.api_keys[idx].clone()
+    }
+}
+
+impl ChannelInfo {
+    /// 查找指定类型的端点
+    pub fn find_endpoint(&self, endpoint_type: &EndpointType) -> Option<EndpointConfig> {
+        self.endpoints.iter()
+            .find(|e| e.endpoint_type == *endpoint_type)
+            .cloned()
     }
 }
 

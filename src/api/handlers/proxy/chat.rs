@@ -1,11 +1,7 @@
 use axum::{extract::State, http::{HeaderMap, StatusCode}, response::IntoResponse, Json};
 use serde_json::Value;
 
-use crate::protocol::{
-    inbound::Inbound,
-    outbound::Outbound,
-    openai_chat::{OpenAiChatInbound, OpenAiChatOutbound},
-};
+use crate::api::handlers::admin::channels::EndpointType;
 use crate::proxy::ProxyState;
 
 /// OpenAI Chat Completions 代理
@@ -14,18 +10,17 @@ pub async fn proxy(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
-    // 解析请求获取模型名
     let model = body["model"].as_str().unwrap_or("unknown");
     let is_stream = body["stream"].as_bool().unwrap_or(false);
 
-    // 获取 session_hash（从请求头或 body）
+    // 获取 session_hash
     let session_hash = headers.get("x-session-hash")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string())
         .or_else(|| body["session_hash"].as_str().map(|s| s.to_string()));
 
     // 选择渠道
-    let selection = match state.select_channel(model, session_hash.as_deref()).await {
+    let selection = match state.select_channel(model, EndpointType::OpenAiChat, session_hash.as_deref()).await {
         Ok(s) => s,
         Err(e) => {
             return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
@@ -47,7 +42,7 @@ pub async fn proxy(
     reqwest_headers.insert("Authorization", format!("Bearer {}", api_key).parse().unwrap());
 
     // 构建 URL
-    let url = format!("{}/v1/chat/completions", selection.channel.base_url);
+    let url = format!("{}{}", selection.endpoint.base_url, EndpointType::OpenAiChat.path());
 
     let start_time = std::time::Instant::now();
     let channel_id = selection.channel.id.clone();
@@ -74,40 +69,18 @@ pub async fn proxy(
                     }))).into_response();
                 }
 
-                // 记录成功（流式请求在开始时记录）
+                // 记录成功
                 state.lb_state.record_success(&channel_id, start_time.elapsed().as_millis() as f64).await;
 
                 // 流式转发
                 let stream = response.bytes_stream();
                 use futures::StreamExt;
 
-                let outbound = OpenAiChatOutbound;
-                let inbound = OpenAiChatInbound;
-
                 let response_stream = async_stream::stream! {
                     let mut stream = std::pin::pin!(stream);
                     while let Some(chunk) = stream.next().await {
                         match chunk {
-                            Ok(bytes) => {
-                                // 尝试转换为统一流式响应
-                                match outbound.transform_stream_event(&bytes) {
-                                    Ok(Some(event)) => {
-                                        // 转换为客户端格式
-                                        match inbound.transform_stream_event(&event) {
-                                            Ok(data) => yield Ok::<_, std::convert::Infallible>(axum::body::Bytes::from(data)),
-                                            Err(_) => yield Ok(axum::body::Bytes::from(bytes)),
-                                        }
-                                    }
-                                    Ok(None) => {
-                                        // [DONE] 或空事件，直接转发
-                                        yield Ok(axum::body::Bytes::from(bytes));
-                                    }
-                                    Err(_) => {
-                                        // 解析失败，直接转发
-                                        yield Ok(axum::body::Bytes::from(bytes));
-                                    }
-                                }
-                            }
+                            Ok(bytes) => yield Ok::<_, std::convert::Infallible>(axum::body::Bytes::from(bytes)),
                             Err(e) => {
                                 tracing::error!("Stream error: {}", e);
                                 break;

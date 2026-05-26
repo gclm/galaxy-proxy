@@ -4,23 +4,38 @@ use sqlx::SqlitePool;
 
 use crate::api::{ApiError, ApiResponse, response::generate_id};
 
-/// 渠道类型
+/// 端点类型
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "snake_case")]
-pub enum ChannelType {
+pub enum EndpointType {
     OpenAiChat,
     OpenAiResponse,
     Anthropic,
+    Gemini,
+    OpenAiEmbedding,
+    OpenAiImages,
 }
 
-impl std::fmt::Display for ChannelType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl EndpointType {
+    /// 获取端点路径
+    pub fn path(&self) -> &'static str {
         match self {
-            ChannelType::OpenAiChat => write!(f, "openai_chat"),
-            ChannelType::OpenAiResponse => write!(f, "openai_response"),
-            ChannelType::Anthropic => write!(f, "anthropic"),
+            Self::OpenAiChat => "/chat/completions",
+            Self::OpenAiResponse => "/responses",
+            Self::Anthropic => "/messages",
+            Self::Gemini => "/models/{model}:generateContent",
+            Self::OpenAiEmbedding => "/embeddings",
+            Self::OpenAiImages => "/images/generations",
         }
     }
+}
+
+/// 端点配置
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct EndpointConfig {
+    #[serde(rename = "type")]
+    pub endpoint_type: EndpointType,
+    pub base_url: String,
 }
 
 /// 渠道
@@ -28,10 +43,8 @@ impl std::fmt::Display for ChannelType {
 pub struct Channel {
     pub id: String,
     pub name: String,
-    #[serde(rename = "type")]
-    pub channel_type: ChannelType,
-    pub base_url: String,
     pub api_keys: Vec<String>,
+    pub endpoints: Vec<EndpointConfig>,
     pub model_maps: serde_json::Value,
     pub rate_limit_rpm: Option<i32>,
     pub rate_limit_tpm: Option<i32>,
@@ -47,10 +60,8 @@ pub struct Channel {
 #[derive(Debug, Deserialize)]
 pub struct CreateChannelRequest {
     pub name: String,
-    #[serde(rename = "type")]
-    pub channel_type: ChannelType,
-    pub base_url: String,
     pub api_keys: Vec<String>,
+    pub endpoints: Vec<EndpointConfig>,
     pub model_maps: Option<serde_json::Value>,
     pub rate_limit_rpm: Option<i32>,
     pub rate_limit_tpm: Option<i32>,
@@ -64,10 +75,8 @@ pub struct CreateChannelRequest {
 #[derive(Debug, Deserialize)]
 pub struct UpdateChannelRequest {
     pub name: Option<String>,
-    #[serde(rename = "type")]
-    pub channel_type: Option<ChannelType>,
-    pub base_url: Option<String>,
     pub api_keys: Option<Vec<String>>,
+    pub endpoints: Option<Vec<EndpointConfig>>,
     pub model_maps: Option<serde_json::Value>,
     pub rate_limit_rpm: Option<i32>,
     pub rate_limit_tpm: Option<i32>,
@@ -87,8 +96,8 @@ pub struct ChannelState {
 pub async fn list(
     State(state): State<ChannelState>,
 ) -> Result<Json<ApiResponse<Vec<Channel>>>, (StatusCode, Json<ApiError>)> {
-    let channels = sqlx::query_as::<_, (String, String, String, String, String, String, Option<i32>, Option<i32>, i32, i32, i32, bool, String, String)>(
-        "SELECT id, name, type, base_url, api_keys, model_maps, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at FROM channels ORDER BY created_at DESC"
+    let channels = sqlx::query_as::<_, (String, String, String, String, String, Option<i32>, Option<i32>, i32, i32, i32, bool, String, String)>(
+        "SELECT id, name, api_keys, endpoints, model_maps, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at FROM channels ORDER BY created_at DESC"
     )
     .fetch_all(&state.pool)
     .await
@@ -96,22 +105,16 @@ pub async fn list(
 
     let result: Vec<Channel> = channels
         .into_iter()
-        .map(|(id, name, type_str, base_url, api_keys_str, model_maps_str, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at)| {
-            let channel_type = match type_str.as_str() {
-                "openai_chat" => ChannelType::OpenAiChat,
-                "openai_response" => ChannelType::OpenAiResponse,
-                "anthropic" => ChannelType::Anthropic,
-                _ => ChannelType::OpenAiChat,
-            };
+        .map(|(id, name, api_keys_str, endpoints_str, model_maps_str, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at)| {
             let api_keys: Vec<String> = serde_json::from_str(&api_keys_str).unwrap_or_default();
+            let endpoints: Vec<EndpointConfig> = serde_json::from_str(&endpoints_str).unwrap_or_default();
             let model_maps: serde_json::Value = serde_json::from_str(&model_maps_str).unwrap_or_default();
 
             Channel {
                 id,
                 name,
-                channel_type,
-                base_url,
                 api_keys,
+                endpoints,
                 model_maps,
                 rate_limit_rpm,
                 rate_limit_tpm,
@@ -140,9 +143,14 @@ pub async fn create(
     if req.api_keys.is_empty() {
         return Err(ApiError::bad_request("至少需要一个 API Key"));
     }
+    if req.endpoints.is_empty() {
+        return Err(ApiError::bad_request("至少需要一个端点"));
+    }
 
     let id = generate_id();
     let api_keys_json = serde_json::to_string(&req.api_keys)
+        .map_err(|e| ApiError::internal_error(e.to_string()))?;
+    let endpoints_json = serde_json::to_string(&req.endpoints)
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
     let model_maps_json = serde_json::to_string(&req.model_maps.unwrap_or_default())
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
@@ -150,15 +158,14 @@ pub async fn create(
     // 插入渠道
     sqlx::query(
         r#"
-        INSERT INTO channels (id, name, type, base_url, api_keys, model_maps, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO channels (id, name, api_keys, endpoints, model_maps, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#
     )
     .bind(&id)
     .bind(&req.name)
-    .bind(req.channel_type.to_string())
-    .bind(&req.base_url)
     .bind(&api_keys_json)
+    .bind(&endpoints_json)
     .bind(&model_maps_json)
     .bind(req.rate_limit_rpm)
     .bind(req.rate_limit_tpm)
@@ -215,17 +222,13 @@ pub async fn update(
         updates.push("name = ?");
         values.push(name.clone());
     }
-    if let Some(channel_type) = &req.channel_type {
-        updates.push("type = ?");
-        values.push(channel_type.to_string());
-    }
-    if let Some(base_url) = &req.base_url {
-        updates.push("base_url = ?");
-        values.push(base_url.clone());
-    }
     if let Some(api_keys) = &req.api_keys {
         updates.push("api_keys = ?");
         values.push(serde_json::to_string(api_keys).unwrap_or_default());
+    }
+    if let Some(endpoints) = &req.endpoints {
+        updates.push("endpoints = ?");
+        values.push(serde_json::to_string(endpoints).unwrap_or_default());
     }
     if let Some(model_maps) = &req.model_maps {
         updates.push("model_maps = ?");
@@ -238,7 +241,7 @@ pub async fn update(
 
     updates.push("updated_at = CURRENT_TIMESTAMP");
 
-    // 构建动态 SQL，手动审计安全性
+    // 构建动态 SQL
     let sql = format!("UPDATE channels SET {} WHERE id = ?", updates.join(", "));
     let sql: &'static str = Box::leak(sql.into_boxed_str());
 
@@ -277,31 +280,27 @@ pub async fn delete(
 
 /// 根据 ID 获取渠道
 async fn get_channel_by_id(pool: &SqlitePool, id: &str) -> Result<Channel, (StatusCode, Json<ApiError>)> {
-    let result = sqlx::query_as::<_, (String, String, String, String, String, String, Option<i32>, Option<i32>, i32, i32, i32, bool, String, String)>(
-        "SELECT id, name, type, base_url, api_keys, model_maps, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at FROM channels WHERE id = ?"
+    let result = sqlx::query_as::<_, (String, String, String, String, String, Option<i32>, Option<i32>, i32, i32, i32, bool, String, String)>(
+        "SELECT id, name, api_keys, endpoints, model_maps, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at FROM channels WHERE id = ?"
     )
     .bind(id)
     .fetch_optional(pool)
     .await
     .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
-    let (id, name, type_str, base_url, api_keys_str, model_maps_str, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at) =
+    let (id, name, api_keys_str, endpoints_str, model_maps_str, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at) =
         result.ok_or_else(|| ApiError::not_found("渠道不存在"))?;
 
-    let channel_type = match type_str.as_str() {
-        "openai_chat" => ChannelType::OpenAiChat,
-        "openai_response" => ChannelType::OpenAiResponse,
-        "anthropic" => ChannelType::Anthropic,
-        _ => ChannelType::OpenAiChat,
-    };
+    let api_keys: Vec<String> = serde_json::from_str(&api_keys_str).unwrap_or_default();
+    let endpoints: Vec<EndpointConfig> = serde_json::from_str(&endpoints_str).unwrap_or_default();
+    let model_maps: serde_json::Value = serde_json::from_str(&model_maps_str).unwrap_or_default();
 
     Ok(Channel {
         id,
         name,
-        channel_type,
-        base_url,
-        api_keys: serde_json::from_str(&api_keys_str).unwrap_or_default(),
-        model_maps: serde_json::from_str(&model_maps_str).unwrap_or_default(),
+        api_keys,
+        endpoints,
+        model_maps,
         rate_limit_rpm,
         rate_limit_tpm,
         failure_threshold,

@@ -1,0 +1,54 @@
+[
+  {
+    "name": "OpenAI",
+    "endpoints": [
+      {"type": 0, "base_url": "https://api.openai.com/v1"}
+    ]
+  },
+  {
+    "name": "Anthropic",
+    "endpoints": [
+      {"type": 2, "base_url": "https://api.anthropic.com/v1"}
+    ]
+  },
+  {
+    "name": "Google Gemini",
+    "endpoints": [
+      {"type": 3, "base_url": "https://generativelanguage.googleapis.com/v1beta"}
+    ]
+  },
+  {
+    "name": "OpenAI Embedding",
+    "endpoints": [
+      {"type": 5, "base_url": "https://api.openai.com/v1"}
+    ]
+  },
+  {
+    "name": "百炼 Coding Plan",
+    "endpoints": [
+      {"type": 0, "base_url": "https://coding.dashscope.aliyuncs.com/v1"},
+      {"type": 2, "base_url": "https://coding.dashscope.aliyuncs.com/apps/anthropic/v1"}
+    ]
+  },
+  {
+    "name": "GLM Coding Plan",
+    "endpoints": [
+      {"type": 0, "base_url": "https://open.bigmodel.cn/api/coding/paas/v4"},
+      {"type": 2, "base_url": "https://open.bigmodel.cn/api/anthropic/v1"}
+    ]
+  },
+  {
+    "name": "MiniMax Token Plan",
+    "endpoints": [
+      {"type": 0, "base_url": "https://api.minimaxi.com/v1"},
+      {"type": 2, "base_url": "https://api.minimaxi.com/anthropic"}
+    ]
+  },
+  {
+    "name": "通用 Coding Plan",
+    "endpoints": [
+      {"type": 0, "base_url": ""},
+      {"type": 2, "base_url": ""}
+    ]
+  }
+]

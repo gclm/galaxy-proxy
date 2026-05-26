@@ -243,9 +243,8 @@ fn get_migrations() -> Vec<Migration> {
             CREATE TABLE IF NOT EXISTS channels (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE,
-                type TEXT NOT NULL CHECK (type IN ('openai_chat', 'openai_response', 'anthropic')),
-                base_url TEXT NOT NULL,
                 api_keys TEXT NOT NULL DEFAULT '[]',
+                endpoints TEXT NOT NULL DEFAULT '[]',
                 model_maps TEXT NOT NULL DEFAULT '{}',
                 rate_limit_rpm INTEGER,
                 rate_limit_tpm INTEGER,

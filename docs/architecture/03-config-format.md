@@ -64,14 +64,14 @@ CREATE TABLE settings (
 
 ```sql
 CREATE TABLE channels (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
-    type TEXT NOT NULL CHECK (type IN ('openai_chat', 'openai_response', 'anthropic')),
-    base_url TEXT NOT NULL,
+    base_url TEXT NOT NULL,                      -- 基础 URL
     api_keys TEXT NOT NULL DEFAULT '[]',        -- JSON 数组，如 ["sk-xxx", "sk-yyy"]
+    supported_types TEXT NOT NULL DEFAULT '[]', -- JSON 数组，支持的协议类型
     model_maps TEXT NOT NULL DEFAULT '{}',       -- JSON 对象，如 {"claude-*": "claude-sonnet-4-20250514"}
-    rate_limit_rpm INTEGER,                      -- 每分钟请求数限制
-    rate_limit_tpm INTEGER,                      -- 每分钟 Token 数限制
+    rate_limit_rpm INTEGER,
+    rate_limit_tpm INTEGER,
     failure_threshold INTEGER NOT NULL DEFAULT 3,
     blacklist_minutes INTEGER NOT NULL DEFAULT 10,
     concurrency INTEGER NOT NULL DEFAULT 10,
@@ -82,8 +82,19 @@ CREATE TABLE channels (
 ```
 
 **字段说明**:
-- `api_keys`: 多 Key 时使用轮询（Round Robin）选择
-- `model_maps`: key 是源模型（支持 `*` 和 `?` 通配符），value 是目标模型
+- `api_keys`: 多 Key 时使用轮询选择
+- `supported_types`: 支持的协议类型，如 `["openai_chat", "anthropic"]`
+- `model_maps`: key 是源模型（支持通配符），value 是目标模型
+
+**端点路径映射**（按协议类型自动拼接）:
+
+| 协议类型 | 端点路径 |
+|---------|---------|
+| `openai_chat` | `{base_url}/v1/chat/completions` |
+| `openai_response` | `{base_url}/v1/responses` |
+| `anthropic` | `{base_url}/v1/messages` |
+| `embedding` | `{base_url}/v1/embeddings` |
+| `images` | `{base_url}/v1/images/generations` |
 
 ### api_keys 表（客户端侧 Key，用于访问 Proxy）
 

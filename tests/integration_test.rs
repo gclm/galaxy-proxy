@@ -93,13 +93,12 @@ async fn test_channel_crud() {
 
     // 创建渠道
     sqlx::query(
-        "INSERT INTO channels (id, name, type, base_url, api_keys) VALUES (?, ?, ?, ?, ?)"
+        "INSERT INTO channels (id, name, api_keys, endpoints) VALUES (?, ?, ?, ?)"
     )
     .bind(&channel_id)
     .bind("test-channel")
-    .bind("openai_chat")
-    .bind("https://api.openai.com")
     .bind(r#"["sk-test"]"#)
+    .bind(r#"[{"type":"openai_chat","base_url":"https://api.openai.com/v1"}]"#)
     .execute(&pool)
     .await
     .unwrap();
@@ -143,13 +142,12 @@ async fn test_group_crud() {
     // 先创建一个渠道
     let channel_id = uuid::Uuid::now_v7().to_string();
     sqlx::query(
-        "INSERT INTO channels (id, name, type, base_url, api_keys) VALUES (?, ?, ?, ?, ?)"
+        "INSERT INTO channels (id, name, api_keys, endpoints) VALUES (?, ?, ?, ?)"
     )
     .bind(&channel_id)
     .bind("test-channel")
-    .bind("openai_chat")
-    .bind("https://api.openai.com")
     .bind(r#"["sk-test"]"#)
+    .bind(r#"[{"type":"openai_chat","base_url":"https://api.openai.com/v1"}]"#)
     .execute(&pool)
     .await
     .unwrap();
