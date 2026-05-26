@@ -1,8 +1,12 @@
-use axum::{extract::{Path, State}, http::StatusCode, Json};
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    Json,
+};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-use crate::api::{ApiError, ApiResponse, response::generate_id};
+use crate::api::{response::generate_id, ApiError, ApiResponse};
 
 /// API Key
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -47,16 +51,16 @@ pub async fn list(
 
     let result: Vec<ApiKey> = keys
         .into_iter()
-        .map(|(id, name, api_key, enabled, created_at, updated_at)| {
-            ApiKey {
+        .map(
+            |(id, name, api_key, enabled, created_at, updated_at)| ApiKey {
                 id,
                 name,
                 api_key,
                 enabled,
                 created_at,
                 updated_at,
-            }
-        })
+            },
+        )
         .collect();
 
     Ok(Json(ApiResponse::success(result)))
@@ -80,7 +84,7 @@ pub async fn create(
         r#"
         INSERT INTO api_keys (id, name, api_key, enabled)
         VALUES (?, ?, ?, ?)
-        "#
+        "#,
     )
     .bind(&id)
     .bind(&req.name)
@@ -108,7 +112,7 @@ pub async fn get(
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<ApiKey>>, (StatusCode, Json<ApiError>)> {
     let result = sqlx::query_as::<_, (String, String, String, bool, String, String)>(
-        "SELECT id, name, api_key, enabled, created_at, updated_at FROM api_keys WHERE id = ?"
+        "SELECT id, name, api_key, enabled, created_at, updated_at FROM api_keys WHERE id = ?",
     )
     .bind(&id)
     .fetch_optional(&state.pool)
@@ -174,7 +178,8 @@ pub async fn update(
     }
     query = query.bind(&id);
 
-    query.execute(&state.pool)
+    query
+        .execute(&state.pool)
         .await
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
@@ -202,12 +207,10 @@ pub async fn delete(
 
 /// 验证 API Key（供代理 API 使用）
 pub async fn validate_api_key(pool: &SqlitePool, api_key: &str) -> bool {
-    let result = sqlx::query_scalar::<_, bool>(
-        "SELECT enabled FROM api_keys WHERE api_key = ?"
-    )
-    .bind(api_key)
-    .fetch_optional(pool)
-    .await;
+    let result = sqlx::query_scalar::<_, bool>("SELECT enabled FROM api_keys WHERE api_key = ?")
+        .bind(api_key)
+        .fetch_optional(pool)
+        .await;
 
     match result {
         Ok(Some(enabled)) => enabled,

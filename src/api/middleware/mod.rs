@@ -38,10 +38,12 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthClaims {
                 .map_err(|_| (StatusCode::UNAUTHORIZED, "缺少认证令牌".to_string()))?;
 
             // 从 extensions 获取 JWT secret
-            let jwt_secret = parts
-                .extensions
-                .get::<String>()
-                .ok_or_else(|| (StatusCode::INTERNAL_SERVER_ERROR, "JWT 配置缺失".to_string()))?;
+            let jwt_secret = parts.extensions.get::<String>().ok_or_else(|| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "JWT 配置缺失".to_string(),
+                )
+            })?;
 
             // 验证 Token
             let token_data = jsonwebtoken::decode::<Claims>(

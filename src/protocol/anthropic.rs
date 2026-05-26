@@ -60,7 +60,11 @@ struct AnthropicUsage {
 
 #[async_trait]
 impl Inbound for AnthropicInbound {
-    async fn transform_request(&self, body: &[u8], _headers: &HeaderMap) -> Result<LlmRequest, InboundError> {
+    async fn transform_request(
+        &self,
+        body: &[u8],
+        _headers: &HeaderMap,
+    ) -> Result<LlmRequest, InboundError> {
         let request: AnthropicRequest = serde_json::from_slice(body)
             .map_err(|e| InboundError::ParseError(format!("解析 Anthropic 请求失败: {}", e)))?;
 
@@ -71,15 +75,20 @@ impl Inbound for AnthropicInbound {
             let system_text = if let Some(s) = system.as_str() {
                 s.to_string()
             } else if let Some(arr) = system.as_array() {
-                arr.iter().filter_map(|item| {
-                    if item["type"] == "text" {
-                        item["text"].as_str().map(|s| s.to_string())
-                    } else {
-                        None
-                    }
-                }).collect::<Vec<_>>().join("\n")
+                arr.iter()
+                    .filter_map(|item| {
+                        if item["type"] == "text" {
+                            item["text"].as_str().map(|s| s.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
             } else {
-                return Err(InboundError::InvalidRequest("无效的 system 格式".to_string()));
+                return Err(InboundError::InvalidRequest(
+                    "无效的 system 格式".to_string(),
+                ));
             };
 
             messages.push(Message {
@@ -103,8 +112,9 @@ impl Inbound for AnthropicInbound {
             let content = if let Some(s) = msg.content.as_str() {
                 Some(Content::Text(s.to_string()))
             } else if let Some(arr) = msg.content.as_array() {
-                let parts: Vec<ContentPart> = arr.iter().filter_map(|item| {
-                    match item["type"].as_str()? {
+                let parts: Vec<ContentPart> = arr
+                    .iter()
+                    .filter_map(|item| match item["type"].as_str()? {
                         "text" => Some(ContentPart::Text {
                             text: item["text"].as_str()?.to_string(),
                         }),
@@ -124,8 +134,8 @@ impl Inbound for AnthropicInbound {
                             content: item["content"].as_str().unwrap_or("").to_string(),
                         }),
                         _ => None,
-                    }
-                }).collect();
+                    })
+                    .collect();
 
                 Some(Content::Parts(parts))
             } else {
@@ -159,7 +169,9 @@ impl Inbound for AnthropicInbound {
     }
 
     fn transform_response(&self, response: &LlmResponse) -> Result<Vec<u8>, InboundError> {
-        let content: Vec<serde_json::Value> = response.choices.first()
+        let content: Vec<serde_json::Value> = response
+            .choices
+            .first()
             .map(|choice| {
                 let mut parts = vec![];
 
@@ -228,22 +240,21 @@ impl Inbound for AnthropicInbound {
 
         if let Some(choice) = event.first_choice() {
             if let Some(content) = &choice.delta.content {
-                match content {
-                    Content::Text(text) => {
-                        events.push(format!("event: content_block_delta\ndata: {}\n\n",
-                            serde_json::json!({
-                                "type": "content_block_delta",
-                                "index": 0,
-                                "delta": { "type": "text_delta", "text": text }
-                            })
-                        ));
-                    }
-                    _ => {}
+                if let Content::Text(text) = content {
+                    events.push(format!(
+                        "event: content_block_delta\ndata: {}\n\n",
+                        serde_json::json!({
+                            "type": "content_block_delta",
+                            "index": 0,
+                            "delta": { "type": "text_delta", "text": text }
+                        })
+                    ));
                 }
             }
 
             if choice.finish_reason.is_some() {
-                events.push(format!("event: message_stop\ndata: {}\n\n",
+                events.push(format!(
+                    "event: message_stop\ndata: {}\n\n",
                     serde_json::json!({ "type": "message_stop" })
                 ));
             }
@@ -269,13 +280,16 @@ impl Outbound for AnthropicOutbound {
                     system = msg.content.as_ref().map(|c| match c {
                         Content::Text(s) => serde_json::Value::String(s.clone()),
                         Content::Parts(parts) => {
-                            let text_parts: Vec<_> = parts.iter().filter_map(|p| {
-                                if let ContentPart::Text { text } = p {
-                                    Some(serde_json::json!({ "type": "text", "text": text }))
-                                } else {
-                                    None
-                                }
-                            }).collect();
+                            let text_parts: Vec<_> = parts
+                                .iter()
+                                .filter_map(|p| {
+                                    if let ContentPart::Text { text } = p {
+                                        Some(serde_json::json!({ "type": "text", "text": text }))
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
                             serde_json::Value::Array(text_parts)
                         }
                     });
@@ -284,24 +298,30 @@ impl Outbound for AnthropicOutbound {
                     let content = match &msg.content {
                         Some(Content::Text(text)) => serde_json::Value::String(text.clone()),
                         Some(Content::Parts(parts)) => {
-                            let anthropic_parts: Vec<_> = parts.iter().map(|p| match p {
-                                ContentPart::Text { text } => serde_json::json!({
-                                    "type": "text",
-                                    "text": text
-                                }),
-                                ContentPart::ToolUse { id, name, input } => serde_json::json!({
-                                    "type": "tool_use",
-                                    "id": id,
-                                    "name": name,
-                                    "input": input
-                                }),
-                                ContentPart::ToolResult { tool_call_id, content } => serde_json::json!({
-                                    "type": "tool_result",
-                                    "tool_use_id": tool_call_id,
-                                    "content": content
-                                }),
-                                _ => serde_json::json!({ "type": "text", "text": "" }),
-                            }).collect();
+                            let anthropic_parts: Vec<_> = parts
+                                .iter()
+                                .map(|p| match p {
+                                    ContentPart::Text { text } => serde_json::json!({
+                                        "type": "text",
+                                        "text": text
+                                    }),
+                                    ContentPart::ToolUse { id, name, input } => serde_json::json!({
+                                        "type": "tool_use",
+                                        "id": id,
+                                        "name": name,
+                                        "input": input
+                                    }),
+                                    ContentPart::ToolResult {
+                                        tool_call_id,
+                                        content,
+                                    } => serde_json::json!({
+                                        "type": "tool_result",
+                                        "tool_use_id": tool_call_id,
+                                        "content": content
+                                    }),
+                                    _ => serde_json::json!({ "type": "text", "text": "" }),
+                                })
+                                .collect();
                             serde_json::Value::Array(anthropic_parts)
                         }
                         None => serde_json::Value::String(String::new()),
@@ -341,7 +361,11 @@ impl Outbound for AnthropicOutbound {
             .map_err(|e| OutboundError::TransformError(format!("序列化请求失败: {}", e)))
     }
 
-    async fn transform_response(&self, body: &[u8], _status: u16) -> Result<LlmResponse, OutboundError> {
+    async fn transform_response(
+        &self,
+        body: &[u8],
+        _status: u16,
+    ) -> Result<LlmResponse, OutboundError> {
         let response: serde_json::Value = serde_json::from_slice(body)
             .map_err(|e| OutboundError::ParseError(format!("解析 Anthropic 响应失败: {}", e)))?;
 
@@ -354,7 +378,9 @@ impl Outbound for AnthropicOutbound {
                 match item["type"].as_str() {
                     Some("text") => {
                         if let Some(text) = item["text"].as_str() {
-                            message_content.push(ContentPart::Text { text: text.to_string() });
+                            message_content.push(ContentPart::Text {
+                                text: text.to_string(),
+                            });
                         }
                     }
                     Some("tool_use") => {
@@ -391,7 +417,8 @@ impl Outbound for AnthropicOutbound {
         let usage = response["usage"].as_object().map(|u| Usage {
             prompt_tokens: u["input_tokens"].as_u64().unwrap_or(0) as u32,
             completion_tokens: u["output_tokens"].as_u64().unwrap_or(0) as u32,
-            total_tokens: (u["input_tokens"].as_u64().unwrap_or(0) + u["output_tokens"].as_u64().unwrap_or(0)) as u32,
+            total_tokens: (u["input_tokens"].as_u64().unwrap_or(0)
+                + u["output_tokens"].as_u64().unwrap_or(0)) as u32,
             prompt_tokens_details: None,
             completion_tokens_details: None,
         });
@@ -418,7 +445,10 @@ impl Outbound for AnthropicOutbound {
         })
     }
 
-    fn transform_stream_event(&self, event: &[u8]) -> Result<Option<LlmStreamResponse>, OutboundError> {
+    fn transform_stream_event(
+        &self,
+        event: &[u8],
+    ) -> Result<Option<LlmStreamResponse>, OutboundError> {
         let text = String::from_utf8_lossy(event);
         let text = text.trim();
 
@@ -443,8 +473,9 @@ impl Outbound for AnthropicOutbound {
             return Ok(None);
         }
 
-        let parsed: serde_json::Value = serde_json::from_str(data)
-            .map_err(|e| OutboundError::ParseError(format!("解析 Anthropic 流式事件失败: {}", e)))?;
+        let parsed: serde_json::Value = serde_json::from_str(data).map_err(|e| {
+            OutboundError::ParseError(format!("解析 Anthropic 流式事件失败: {}", e))
+        })?;
 
         match event_type {
             "content_block_delta" => {
@@ -470,28 +501,26 @@ impl Outbound for AnthropicOutbound {
                     system_fingerprint: None,
                 }))
             }
-            "message_stop" => {
-                Ok(Some(LlmStreamResponse {
-                    id: String::new(),
-                    object: "chat.completion.chunk".to_string(),
-                    created: chrono::Utc::now().timestamp(),
-                    model: String::new(),
-                    choices: vec![StreamChoice {
-                        index: 0,
-                        delta: Message {
-                            role: Role::Assistant,
-                            content: None,
-                            name: None,
-                            tool_calls: None,
-                            tool_call_id: None,
-                            reasoning_content: None,
-                        },
-                        finish_reason: Some(FinishReason::Stop),
-                    }],
-                    usage: None,
-                    system_fingerprint: None,
-                }))
-            }
+            "message_stop" => Ok(Some(LlmStreamResponse {
+                id: String::new(),
+                object: "chat.completion.chunk".to_string(),
+                created: chrono::Utc::now().timestamp(),
+                model: String::new(),
+                choices: vec![StreamChoice {
+                    index: 0,
+                    delta: Message {
+                        role: Role::Assistant,
+                        content: None,
+                        name: None,
+                        tool_calls: None,
+                        tool_call_id: None,
+                        reasoning_content: None,
+                    },
+                    finish_reason: Some(FinishReason::Stop),
+                }],
+                usage: None,
+                system_fingerprint: None,
+            })),
             _ => Ok(None),
         }
     }

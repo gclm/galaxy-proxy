@@ -1,8 +1,12 @@
-use axum::{extract::{Path, State}, http::StatusCode, Json};
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    Json,
+};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-use crate::api::{ApiError, ApiResponse, response::generate_id};
+use crate::api::{response::generate_id, ApiError, ApiResponse};
 
 /// 端点类型
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -109,17 +113,13 @@ pub async fn list(
 
     let result: Vec<Channel> = channels
         .into_iter()
-        .map(|(id, name, api_keys_str, endpoints_str, model_maps_str, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at)| {
-            let api_keys: Vec<String> = serde_json::from_str(&api_keys_str).unwrap_or_default();
-            let endpoints: Vec<EndpointConfig> = serde_json::from_str(&endpoints_str).unwrap_or_default();
-            let model_maps: serde_json::Value = serde_json::from_str(&model_maps_str).unwrap_or_default();
-
-            Channel {
+        .map(
+            |(
                 id,
                 name,
-                api_keys,
-                endpoints,
-                model_maps,
+                api_keys_str,
+                endpoints_str,
+                model_maps_str,
                 rate_limit_rpm,
                 rate_limit_tpm,
                 failure_threshold,
@@ -128,8 +128,30 @@ pub async fn list(
                 enabled,
                 created_at,
                 updated_at,
-            }
-        })
+            )| {
+                let api_keys: Vec<String> = serde_json::from_str(&api_keys_str).unwrap_or_default();
+                let endpoints: Vec<EndpointConfig> =
+                    serde_json::from_str(&endpoints_str).unwrap_or_default();
+                let model_maps: serde_json::Value =
+                    serde_json::from_str(&model_maps_str).unwrap_or_default();
+
+                Channel {
+                    id,
+                    name,
+                    api_keys,
+                    endpoints,
+                    model_maps,
+                    rate_limit_rpm,
+                    rate_limit_tpm,
+                    failure_threshold,
+                    blacklist_minutes,
+                    concurrency,
+                    enabled,
+                    created_at,
+                    updated_at,
+                }
+            },
+        )
         .collect();
 
     Ok(Json(ApiResponse::success(result)))
@@ -255,7 +277,8 @@ pub async fn update(
     }
     query = query.bind(&id);
 
-    query.execute(&state.pool)
+    query
+        .execute(&state.pool)
         .await
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
@@ -283,7 +306,10 @@ pub async fn delete(
 }
 
 /// 根据 ID 获取渠道
-async fn get_channel_by_id(pool: &SqlitePool, id: &str) -> Result<Channel, (StatusCode, Json<ApiError>)> {
+async fn get_channel_by_id(
+    pool: &SqlitePool,
+    id: &str,
+) -> Result<Channel, (StatusCode, Json<ApiError>)> {
     let result = sqlx::query_as::<_, (String, String, String, String, String, Option<i32>, Option<i32>, i32, i32, i32, bool, String, String)>(
         "SELECT id, name, api_keys, endpoints, model_maps, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at FROM channels WHERE id = ?"
     )
@@ -292,8 +318,21 @@ async fn get_channel_by_id(pool: &SqlitePool, id: &str) -> Result<Channel, (Stat
     .await
     .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
-    let (id, name, api_keys_str, endpoints_str, model_maps_str, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at) =
-        result.ok_or_else(|| ApiError::not_found("渠道不存在"))?;
+    let (
+        id,
+        name,
+        api_keys_str,
+        endpoints_str,
+        model_maps_str,
+        rate_limit_rpm,
+        rate_limit_tpm,
+        failure_threshold,
+        blacklist_minutes,
+        concurrency,
+        enabled,
+        created_at,
+        updated_at,
+    ) = result.ok_or_else(|| ApiError::not_found("渠道不存在"))?;
 
     let api_keys: Vec<String> = serde_json::from_str(&api_keys_str).unwrap_or_default();
     let endpoints: Vec<EndpointConfig> = serde_json::from_str(&endpoints_str).unwrap_or_default();

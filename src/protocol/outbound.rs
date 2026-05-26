@@ -11,10 +11,17 @@ pub trait Outbound: Send + Sync {
     fn transform_request(&self, request: &LlmRequest) -> Result<Vec<u8>, OutboundError>;
 
     /// 将提供商响应转换为统一响应
-    async fn transform_response(&self, body: &[u8], status: u16) -> Result<LlmResponse, OutboundError>;
+    async fn transform_response(
+        &self,
+        body: &[u8],
+        status: u16,
+    ) -> Result<LlmResponse, OutboundError>;
 
     /// 将提供商流式事件转换为统一流式响应
-    fn transform_stream_event(&self, event: &[u8]) -> Result<Option<LlmStreamResponse>, OutboundError>;
+    fn transform_stream_event(
+        &self,
+        event: &[u8],
+    ) -> Result<Option<LlmStreamResponse>, OutboundError>;
 
     /// 获取提供商 API 格式
     fn api_format(&self) -> &'static str;

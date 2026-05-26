@@ -1,5 +1,5 @@
-use sqlx::SqlitePool;
 use crate::api::response::generate_id;
+use sqlx::SqlitePool;
 
 /// 统计记录器
 pub struct StatsRecorder {
@@ -41,7 +41,7 @@ impl StatsRecorder {
                 input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
                 cost, latency_ms, status_code, error_message
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            "#
+            "#,
         )
         .bind(&id)
         .bind(&record.api_key_id)
@@ -68,7 +68,7 @@ impl StatsRecorder {
         let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
         let id = generate_id();
 
-        let is_success = record.status_code.map_or(true, |s| s >= 200 && s < 400);
+        let is_success = record.status_code.is_none_or(|s| (200..400).contains(&s));
 
         sqlx::query(
             r#"
@@ -87,7 +87,7 @@ impl StatsRecorder {
                 cache_read_tokens = cache_read_tokens + ?,
                 cache_creation_tokens = cache_creation_tokens + ?,
                 total_cost = total_cost + ?
-            "#
+            "#,
         )
         .bind(&id)
         .bind(&date)

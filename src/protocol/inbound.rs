@@ -9,7 +9,11 @@ use super::model::{LlmRequest, LlmResponse, LlmStreamResponse};
 #[async_trait]
 pub trait Inbound: Send + Sync {
     /// 从 HTTP 请求体解析为统一请求
-    async fn transform_request(&self, body: &[u8], headers: &HeaderMap) -> Result<LlmRequest, InboundError>;
+    async fn transform_request(
+        &self,
+        body: &[u8],
+        headers: &HeaderMap,
+    ) -> Result<LlmRequest, InboundError>;
 
     /// 将统一响应转换为客户端响应
     fn transform_response(&self, response: &LlmResponse) -> Result<Vec<u8>, InboundError>;

@@ -5,10 +5,10 @@ use serde::{Deserialize, Serialize};
 /// JWT Claims
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
-    pub sub: String,    // 用户 ID
+    pub sub: String, // 用户 ID
     pub username: String,
-    pub exp: usize,     // 过期时间
-    pub iat: usize,     // 签发时间
+    pub exp: usize, // 过期时间
+    pub iat: usize, // 签发时间
 }
 
 /// JWT 服务
@@ -28,7 +28,11 @@ impl JwtService {
     }
 
     /// 生成 Token
-    pub fn generate_token(&self, user_id: &str, username: &str) -> Result<String, jsonwebtoken::errors::Error> {
+    pub fn generate_token(
+        &self,
+        user_id: &str,
+        username: &str,
+    ) -> Result<String, jsonwebtoken::errors::Error> {
         let now = Utc::now();
         let expires_at = now + Duration::hours(self.expiry_hours as i64);
 

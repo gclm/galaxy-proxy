@@ -1,4 +1,8 @@
-use axum::{routing::{get, post, put, delete}, Json, Router, middleware};
+use axum::{
+    middleware,
+    routing::{delete, get, post, put},
+    Json, Router,
+};
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 use tower_http::trace::TraceLayer;
@@ -19,17 +23,11 @@ pub fn create_router(pool: SqlitePool, jwt_secret: String) -> Router {
         jwt_service: crate::auth::JwtService::new(&jwt_secret, 24),
     };
 
-    let channel_state = ChannelState {
-        pool: pool.clone(),
-    };
+    let channel_state = ChannelState { pool: pool.clone() };
 
-    let group_state = GroupState {
-        pool: pool.clone(),
-    };
+    let group_state = GroupState { pool: pool.clone() };
 
-    let api_key_state = ApiKeyState {
-        pool: pool.clone(),
-    };
+    let api_key_state = ApiKeyState { pool: pool.clone() };
 
     let stats_state = StatsApiState {
         stats: StatsState::new(pool.clone()),
@@ -53,13 +51,15 @@ pub fn create_router(pool: SqlitePool, jwt_secret: String) -> Router {
         // 管理 API 路由 - 统计
         .nest("/api/v1/admin/stats", stats_routes(stats_state))
         // 注入 JWT secret 到 extensions
-        .layer(middleware::from_fn(move |mut req: axum::http::Request<axum::body::Body>, next: middleware::Next| {
-            let secret = jwt_secret.clone();
-            async move {
-                req.extensions_mut().insert(secret);
-                next.run(req).await
-            }
-        }))
+        .layer(middleware::from_fn(
+            move |mut req: axum::http::Request<axum::body::Body>, next: middleware::Next| {
+                let secret = jwt_secret.clone();
+                async move {
+                    req.extensions_mut().insert(secret);
+                    next.run(req).await
+                }
+            },
+        ))
         // 中间件
         .layer(TraceLayer::new_for_http())
 }
@@ -99,7 +99,12 @@ fn auth_routes(auth_state: AuthState) -> Router {
 fn channel_routes(channel_state: ChannelState) -> Router {
     Router::new()
         .route("/", get(channels::list).post(channels::create))
-        .route("/{id}", get(channels::get).put(channels::update).delete(channels::delete))
+        .route(
+            "/{id}",
+            get(channels::get)
+                .put(channels::update)
+                .delete(channels::delete),
+        )
         .with_state(channel_state)
 }
 
@@ -107,7 +112,10 @@ fn channel_routes(channel_state: ChannelState) -> Router {
 fn group_routes(group_state: GroupState) -> Router {
     Router::new()
         .route("/", get(groups::list).post(groups::create))
-        .route("/{id}", get(groups::get).put(groups::update).delete(groups::delete))
+        .route(
+            "/{id}",
+            get(groups::get).put(groups::update).delete(groups::delete),
+        )
         .route("/{id}/items", post(groups::add_item))
         .route("/{id}/items/{item_id}", delete(groups::delete_item))
         .with_state(group_state)
@@ -117,7 +125,12 @@ fn group_routes(group_state: GroupState) -> Router {
 fn api_key_routes(api_key_state: ApiKeyState) -> Router {
     Router::new()
         .route("/", get(api_keys::list).post(api_keys::create))
-        .route("/{id}", get(api_keys::get).put(api_keys::update).delete(api_keys::delete))
+        .route(
+            "/{id}",
+            get(api_keys::get)
+                .put(api_keys::update)
+                .delete(api_keys::delete),
+        )
         .with_state(api_key_state)
 }
 

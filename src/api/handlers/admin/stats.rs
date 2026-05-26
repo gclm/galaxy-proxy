@@ -1,4 +1,8 @@
-use axum::{extract::{Query, State}, http::StatusCode, Json};
+use axum::{
+    extract::{Query, State},
+    http::StatusCode,
+    Json,
+};
 use serde::Deserialize;
 
 use crate::api::{ApiError, ApiResponse};
@@ -20,7 +24,10 @@ pub struct StatsApiState {
 pub async fn overview(
     State(state): State<StatsApiState>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, (StatusCode, Json<ApiError>)> {
-    let overview = state.stats.get_overview().await
+    let overview = state
+        .stats
+        .get_overview()
+        .await
         .map_err(|e: sqlx::Error| ApiError::internal_error(e.to_string()))?;
 
     Ok(Json(ApiResponse::success(serde_json::json!(overview))))
@@ -32,7 +39,10 @@ pub async fn models(
     Query(query): Query<StatsQuery>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, (StatusCode, Json<ApiError>)> {
     let days = query.days.unwrap_or(30);
-    let stats = state.stats.get_model_stats(days).await
+    let stats = state
+        .stats
+        .get_model_stats(days)
+        .await
         .map_err(|e: sqlx::Error| ApiError::internal_error(e.to_string()))?;
 
     Ok(Json(ApiResponse::success(serde_json::json!(stats))))
@@ -44,7 +54,10 @@ pub async fn channels(
     Query(query): Query<StatsQuery>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, (StatusCode, Json<ApiError>)> {
     let days = query.days.unwrap_or(30);
-    let stats = state.stats.get_channel_stats(days).await
+    let stats = state
+        .stats
+        .get_channel_stats(days)
+        .await
         .map_err(|e: sqlx::Error| ApiError::internal_error(e.to_string()))?;
 
     Ok(Json(ApiResponse::success(serde_json::json!(stats))))
@@ -56,7 +69,10 @@ pub async fn daily(
     Query(query): Query<StatsQuery>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, (StatusCode, Json<ApiError>)> {
     let days = query.days.unwrap_or(30);
-    let stats = state.stats.get_daily_stats(days).await
+    let stats = state
+        .stats
+        .get_daily_stats(days)
+        .await
         .map_err(|e: sqlx::Error| ApiError::internal_error(e.to_string()))?;
 
     Ok(Json(ApiResponse::success(serde_json::json!(stats))))

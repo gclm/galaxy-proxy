@@ -1,8 +1,12 @@
-use axum::{extract::{Path, State}, http::StatusCode, Json};
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    Json,
+};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-use crate::api::{ApiError, ApiResponse, response::generate_id};
+use crate::api::{response::generate_id, ApiError, ApiResponse};
 
 /// 负载均衡模式
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -109,7 +113,18 @@ pub async fn list(
     .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
     let mut result = Vec::new();
-    for (id, name, match_regex, retry_enabled, max_retries, first_token_timeout_secs, enabled, created_at, updated_at) in groups {
+    for (
+        id,
+        name,
+        match_regex,
+        retry_enabled,
+        max_retries,
+        first_token_timeout_secs,
+        enabled,
+        created_at,
+        updated_at,
+    ) in groups
+    {
         let items = get_group_items(&state.pool, &id).await?;
 
         result.push(Group {
@@ -145,7 +160,10 @@ pub async fn create(
     let group_id = generate_id();
 
     // 开始事务
-    let mut tx = state.pool.begin().await
+    let mut tx = state
+        .pool
+        .begin()
+        .await
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
     // 插入分组
@@ -179,7 +197,7 @@ pub async fn create(
             r#"
             INSERT INTO group_items (id, group_id, channel_id, model_name, priority, weight)
             VALUES (?, ?, ?, ?, ?, ?)
-            "#
+            "#,
         )
         .bind(&item_id)
         .bind(&group_id)
@@ -199,7 +217,8 @@ pub async fn create(
     }
 
     // 提交事务
-    tx.commit().await
+    tx.commit()
+        .await
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
     // 返回创建的分组
@@ -262,7 +281,8 @@ pub async fn update(
     }
     query = query.bind(&id);
 
-    query.execute(&state.pool)
+    query
+        .execute(&state.pool)
         .await
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
@@ -312,7 +332,7 @@ pub async fn add_item(
         r#"
         INSERT INTO group_items (id, group_id, channel_id, model_name, priority, weight)
         VALUES (?, ?, ?, ?, ?, ?)
-        "#
+        "#,
     )
     .bind(&item_id)
     .bind(&id)
@@ -361,7 +381,10 @@ pub async fn delete_item(
 }
 
 /// 根据 ID 获取分组
-async fn get_group_by_id(pool: &SqlitePool, id: &str) -> Result<Group, (StatusCode, Json<ApiError>)> {
+async fn get_group_by_id(
+    pool: &SqlitePool,
+    id: &str,
+) -> Result<Group, (StatusCode, Json<ApiError>)> {
     let result = sqlx::query_as::<_, (String, String, Option<String>, bool, i32, i32, bool, String, String)>(
         "SELECT id, name, match_regex, retry_enabled, max_retries, first_token_timeout_secs, enabled, created_at, updated_at FROM groups WHERE id = ?"
     )
@@ -370,8 +393,17 @@ async fn get_group_by_id(pool: &SqlitePool, id: &str) -> Result<Group, (StatusCo
     .await
     .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
-    let (id, name, match_regex, retry_enabled, max_retries, first_token_timeout_secs, enabled, created_at, updated_at) =
-        result.ok_or_else(|| ApiError::not_found("分组不存在"))?;
+    let (
+        id,
+        name,
+        match_regex,
+        retry_enabled,
+        max_retries,
+        first_token_timeout_secs,
+        enabled,
+        created_at,
+        updated_at,
+    ) = result.ok_or_else(|| ApiError::not_found("分组不存在"))?;
 
     let items = get_group_items(pool, &id).await?;
 
@@ -390,7 +422,10 @@ async fn get_group_by_id(pool: &SqlitePool, id: &str) -> Result<Group, (StatusCo
 }
 
 /// 获取分组的所有分组项
-async fn get_group_items(pool: &SqlitePool, group_id: &str) -> Result<Vec<GroupItem>, (StatusCode, Json<ApiError>)> {
+async fn get_group_items(
+    pool: &SqlitePool,
+    group_id: &str,
+) -> Result<Vec<GroupItem>, (StatusCode, Json<ApiError>)> {
     let items = sqlx::query_as::<_, (String, String, String, i32, i32)>(
         "SELECT id, channel_id, model_name, priority, weight FROM group_items WHERE group_id = ? ORDER BY priority DESC, weight DESC"
     )
@@ -399,13 +434,14 @@ async fn get_group_items(pool: &SqlitePool, group_id: &str) -> Result<Vec<GroupI
     .await
     .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
-    Ok(items.into_iter().map(|(id, channel_id, model_name, priority, weight)| {
-        GroupItem {
+    Ok(items
+        .into_iter()
+        .map(|(id, channel_id, model_name, priority, weight)| GroupItem {
             id,
             channel_id,
             model_name,
             priority,
             weight,
-        }
-    }).collect())
+        })
+        .collect())
 }

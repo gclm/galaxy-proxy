@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use axum::http::HeaderMap;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use super::inbound::{Inbound, InboundError};
 use super::model::*;
@@ -29,9 +29,14 @@ struct OpenAiResponsesRequest {
 
 #[async_trait]
 impl Inbound for OpenAiResponsesInbound {
-    async fn transform_request(&self, body: &[u8], _headers: &HeaderMap) -> Result<LlmRequest, InboundError> {
-        let request: OpenAiResponsesRequest = serde_json::from_slice(body)
-            .map_err(|e| InboundError::ParseError(format!("解析 OpenAI Responses 请求失败: {}", e)))?;
+    async fn transform_request(
+        &self,
+        body: &[u8],
+        _headers: &HeaderMap,
+    ) -> Result<LlmRequest, InboundError> {
+        let request: OpenAiResponsesRequest = serde_json::from_slice(body).map_err(|e| {
+            InboundError::ParseError(format!("解析 OpenAI Responses 请求失败: {}", e))
+        })?;
 
         // 将 input 转换为 messages
         let messages = if let Some(input_str) = request.input.as_str() {
@@ -46,40 +51,45 @@ impl Inbound for OpenAiResponsesInbound {
             }]
         } else if let Some(input_array) = request.input.as_array() {
             // 数组输入
-            input_array.iter().filter_map(|item| {
-                if let Some(item_obj) = item.as_object() {
-                    let role = item_obj.get("role")?.as_str()?;
-                    let role = match role {
-                        "system" => Role::System,
-                        "user" => Role::User,
-                        "assistant" => Role::Assistant,
-                        _ => Role::User,
-                    };
+            input_array
+                .iter()
+                .filter_map(|item| {
+                    if let Some(item_obj) = item.as_object() {
+                        let role = item_obj.get("role")?.as_str()?;
+                        let role = match role {
+                            "system" => Role::System,
+                            "user" => Role::User,
+                            "assistant" => Role::Assistant,
+                            _ => Role::User,
+                        };
 
-                    let content = item_obj.get("content").map(|c| {
-                        if let Some(s) = c.as_str() {
-                            Content::Text(s.to_string())
-                        } else {
-                            Content::Parts(vec![ContentPart::Text {
-                                text: serde_json::to_string(c).unwrap_or_default(),
-                            }])
-                        }
-                    });
+                        let content = item_obj.get("content").map(|c| {
+                            if let Some(s) = c.as_str() {
+                                Content::Text(s.to_string())
+                            } else {
+                                Content::Parts(vec![ContentPart::Text {
+                                    text: serde_json::to_string(c).unwrap_or_default(),
+                                }])
+                            }
+                        });
 
-                    Some(Message {
-                        role,
-                        content,
-                        name: None,
-                        tool_calls: None,
-                        tool_call_id: None,
-                        reasoning_content: None,
-                    })
-                } else {
-                    None
-                }
-            }).collect()
+                        Some(Message {
+                            role,
+                            content,
+                            name: None,
+                            tool_calls: None,
+                            tool_call_id: None,
+                            reasoning_content: None,
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect()
         } else {
-            return Err(InboundError::InvalidRequest("无效的 input 格式".to_string()));
+            return Err(InboundError::InvalidRequest(
+                "无效的 input 格式".to_string(),
+            ));
         };
 
         Ok(LlmRequest {
@@ -100,20 +110,23 @@ impl Inbound for OpenAiResponsesInbound {
 
     fn transform_response(&self, response: &LlmResponse) -> Result<Vec<u8>, InboundError> {
         // 将 OpenAI Chat 格式转换为 Responses 格式
-        let output = response.choices.first().map(|choice| {
-            let mut items = vec![];
+        let output = response
+            .choices
+            .first()
+            .map(|choice| {
+                let mut items = vec![];
 
-            if let Some(content) = &choice.message.content {
-                match content {
-                    Content::Text(text) => {
-                        items.push(serde_json::json!({
-                            "type": "message",
-                            "role": "assistant",
-                            "content": [{ "type": "output_text", "text": text }]
-                        }));
-                    }
-                    Content::Parts(parts) => {
-                        let text_parts: Vec<_> = parts.iter().filter_map(|p| {
+                if let Some(content) = &choice.message.content {
+                    match content {
+                        Content::Text(text) => {
+                            items.push(serde_json::json!({
+                                "type": "message",
+                                "role": "assistant",
+                                "content": [{ "type": "output_text", "text": text }]
+                            }));
+                        }
+                        Content::Parts(parts) => {
+                            let text_parts: Vec<_> = parts.iter().filter_map(|p| {
                             if let ContentPart::Text { text } = p {
                                 Some(serde_json::json!({ "type": "output_text", "text": text }))
                             } else {
@@ -121,30 +134,31 @@ impl Inbound for OpenAiResponsesInbound {
                             }
                         }).collect();
 
-                        if !text_parts.is_empty() {
-                            items.push(serde_json::json!({
-                                "type": "message",
-                                "role": "assistant",
-                                "content": text_parts
-                            }));
+                            if !text_parts.is_empty() {
+                                items.push(serde_json::json!({
+                                    "type": "message",
+                                    "role": "assistant",
+                                    "content": text_parts
+                                }));
+                            }
                         }
                     }
                 }
-            }
 
-            if let Some(tool_calls) = &choice.message.tool_calls {
-                for tc in tool_calls {
-                    items.push(serde_json::json!({
-                        "type": "function_call",
-                        "id": tc.id,
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments
-                    }));
+                if let Some(tool_calls) = &choice.message.tool_calls {
+                    for tc in tool_calls {
+                        items.push(serde_json::json!({
+                            "type": "function_call",
+                            "id": tc.id,
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments
+                        }));
+                    }
                 }
-            }
 
-            items
-        }).unwrap_or_default();
+                items
+            })
+            .unwrap_or_default();
 
         let responses_format = serde_json::json!({
             "id": response.id,
@@ -166,23 +180,22 @@ impl Inbound for OpenAiResponsesInbound {
 
         if let Some(choice) = event.first_choice() {
             if let Some(content) = &choice.delta.content {
-                match content {
-                    Content::Text(text) => {
-                        events.push(format!("event: response.output_text.delta\ndata: {}\n\n",
-                            serde_json::json!({
-                                "type": "response.output_text.delta",
-                                "output_index": 0,
-                                "content_index": 0,
-                                "delta": text
-                            })
-                        ));
-                    }
-                    _ => {}
+                if let Content::Text(text) = content {
+                    events.push(format!(
+                        "event: response.output_text.delta\ndata: {}\n\n",
+                        serde_json::json!({
+                            "type": "response.output_text.delta",
+                            "output_index": 0,
+                            "content_index": 0,
+                            "delta": text
+                        })
+                    ));
                 }
             }
 
             if choice.finish_reason.is_some() {
-                events.push(format!("event: response.completed\ndata: {}\n\n",
+                events.push(format!(
+                    "event: response.completed\ndata: {}\n\n",
                     serde_json::json!({
                         "type": "response.completed",
                         "response": {
@@ -206,33 +219,42 @@ impl Inbound for OpenAiResponsesInbound {
 impl Outbound for OpenAiResponsesOutbound {
     fn transform_request(&self, request: &LlmRequest) -> Result<Vec<u8>, OutboundError> {
         // 将统一格式转换为 Responses 格式
-        let input: Vec<serde_json::Value> = request.messages.iter().map(|m| {
-            let role = match m.role {
-                Role::System => "system",
-                Role::User => "user",
-                Role::Assistant => "assistant",
-                _ => "user",
-            };
+        let input: Vec<serde_json::Value> = request
+            .messages
+            .iter()
+            .map(|m| {
+                let role = match m.role {
+                    Role::System => "system",
+                    Role::User => "user",
+                    Role::Assistant => "assistant",
+                    _ => "user",
+                };
 
-            let content = match &m.content {
-                Some(Content::Text(text)) => serde_json::json!([
-                    { "type": "input_text", "text": text }
-                ]),
-                Some(Content::Parts(parts)) => {
-                    let content_parts: Vec<_> = parts.iter().map(|p| match p {
-                        ContentPart::Text { text } => serde_json::json!({ "type": "input_text", "text": text }),
-                        _ => serde_json::json!({ "type": "input_text", "text": "" }),
-                    }).collect();
-                    serde_json::Value::Array(content_parts)
-                }
-                None => serde_json::json!([]),
-            };
+                let content = match &m.content {
+                    Some(Content::Text(text)) => serde_json::json!([
+                        { "type": "input_text", "text": text }
+                    ]),
+                    Some(Content::Parts(parts)) => {
+                        let content_parts: Vec<_> = parts
+                            .iter()
+                            .map(|p| match p {
+                                ContentPart::Text { text } => {
+                                    serde_json::json!({ "type": "input_text", "text": text })
+                                }
+                                _ => serde_json::json!({ "type": "input_text", "text": "" }),
+                            })
+                            .collect();
+                        serde_json::Value::Array(content_parts)
+                    }
+                    None => serde_json::json!([]),
+                };
 
-            serde_json::json!({
-                "role": role,
-                "content": content
+                serde_json::json!({
+                    "role": role,
+                    "content": content
+                })
             })
-        }).collect();
+            .collect();
 
         let body = serde_json::json!({
             "model": request.model,
@@ -246,7 +268,11 @@ impl Outbound for OpenAiResponsesOutbound {
             .map_err(|e| OutboundError::TransformError(format!("序列化请求失败: {}", e)))
     }
 
-    async fn transform_response(&self, body: &[u8], _status: u16) -> Result<LlmResponse, OutboundError> {
+    async fn transform_response(
+        &self,
+        body: &[u8],
+        _status: u16,
+    ) -> Result<LlmResponse, OutboundError> {
         // 解析 Responses 格式并转换为统一格式
         let response: serde_json::Value = serde_json::from_slice(body)
             .map_err(|e| OutboundError::ParseError(format!("解析 Responses 响应失败: {}", e)))?;
@@ -260,8 +286,15 @@ impl Outbound for OpenAiResponsesOutbound {
             for item in output {
                 if item["type"] == "message" {
                     if let Some(content) = item["content"].as_array() {
-                        let text: String = content.iter()
-                            .filter_map(|c| if c["type"] == "output_text" { c["text"].as_str() } else { None })
+                        let text: String = content
+                            .iter()
+                            .filter_map(|c| {
+                                if c["type"] == "output_text" {
+                                    c["text"].as_str()
+                                } else {
+                                    None
+                                }
+                            })
                             .collect();
 
                         if !text.is_empty() {
@@ -286,7 +319,8 @@ impl Outbound for OpenAiResponsesOutbound {
         let usage = response["usage"].as_object().map(|u| Usage {
             prompt_tokens: u["input_tokens"].as_u64().unwrap_or(0) as u32,
             completion_tokens: u["output_tokens"].as_u64().unwrap_or(0) as u32,
-            total_tokens: (u["input_tokens"].as_u64().unwrap_or(0) + u["output_tokens"].as_u64().unwrap_or(0)) as u32,
+            total_tokens: (u["input_tokens"].as_u64().unwrap_or(0)
+                + u["output_tokens"].as_u64().unwrap_or(0)) as u32,
             prompt_tokens_details: None,
             completion_tokens_details: None,
         });
@@ -302,7 +336,10 @@ impl Outbound for OpenAiResponsesOutbound {
         })
     }
 
-    fn transform_stream_event(&self, event: &[u8]) -> Result<Option<LlmStreamResponse>, OutboundError> {
+    fn transform_stream_event(
+        &self,
+        event: &[u8],
+    ) -> Result<Option<LlmStreamResponse>, OutboundError> {
         let text = String::from_utf8_lossy(event);
         let text = text.trim();
 
@@ -327,8 +364,9 @@ impl Outbound for OpenAiResponsesOutbound {
             return Ok(None);
         }
 
-        let parsed: serde_json::Value = serde_json::from_str(data)
-            .map_err(|e| OutboundError::ParseError(format!("解析 Responses 流式事件失败: {}", e)))?;
+        let parsed: serde_json::Value = serde_json::from_str(data).map_err(|e| {
+            OutboundError::ParseError(format!("解析 Responses 流式事件失败: {}", e))
+        })?;
 
         // 根据事件类型转换
         match event_type {
@@ -355,28 +393,26 @@ impl Outbound for OpenAiResponsesOutbound {
                     system_fingerprint: None,
                 }))
             }
-            "response.completed" => {
-                Ok(Some(LlmStreamResponse {
-                    id: parsed["response"]["id"].as_str().unwrap_or("").to_string(),
-                    object: "chat.completion.chunk".to_string(),
-                    created: chrono::Utc::now().timestamp(),
-                    model: String::new(),
-                    choices: vec![StreamChoice {
-                        index: 0,
-                        delta: Message {
-                            role: Role::Assistant,
-                            content: None,
-                            name: None,
-                            tool_calls: None,
-                            tool_call_id: None,
-                            reasoning_content: None,
-                        },
-                        finish_reason: Some(FinishReason::Stop),
-                    }],
-                    usage: None,
-                    system_fingerprint: None,
-                }))
-            }
+            "response.completed" => Ok(Some(LlmStreamResponse {
+                id: parsed["response"]["id"].as_str().unwrap_or("").to_string(),
+                object: "chat.completion.chunk".to_string(),
+                created: chrono::Utc::now().timestamp(),
+                model: String::new(),
+                choices: vec![StreamChoice {
+                    index: 0,
+                    delta: Message {
+                        role: Role::Assistant,
+                        content: None,
+                        name: None,
+                        tool_calls: None,
+                        tool_call_id: None,
+                        reasoning_content: None,
+                    },
+                    finish_reason: Some(FinishReason::Stop),
+                }],
+                usage: None,
+                system_fingerprint: None,
+            })),
             _ => Ok(None),
         }
     }

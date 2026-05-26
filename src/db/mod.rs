@@ -4,7 +4,9 @@ use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use std::path::Path;
 use tracing::info;
 
-use crate::config::{RuntimeConfig, SchedulerConfig, ScoreWeights, StickySessionConfig, StatsConfig, CostConfig};
+use crate::config::{
+    CostConfig, RuntimeConfig, SchedulerConfig, ScoreWeights, StatsConfig, StickySessionConfig,
+};
 
 /// 设置项（数据库行）
 #[derive(Debug, sqlx::FromRow)]
@@ -74,18 +76,20 @@ impl Database {
         .await?;
 
         // 获取已应用的迁移
-        let applied: Vec<i32> = sqlx::query_scalar("SELECT version FROM _migrations ORDER BY version")
-            .fetch_all(&self.pool)
-            .await?;
+        let applied: Vec<i32> =
+            sqlx::query_scalar("SELECT version FROM _migrations ORDER BY version")
+                .fetch_all(&self.pool)
+                .await?;
 
         // 应用迁移
         let migrations = get_migrations();
         for migration in migrations {
             if !applied.contains(&migration.version) {
-                info!("Applying migration {}: {}", migration.version, migration.name);
-                sqlx::query(migration.sql)
-                    .execute(&self.pool)
-                    .await?;
+                info!(
+                    "Applying migration {}: {}",
+                    migration.version, migration.name
+                );
+                sqlx::query(migration.sql).execute(&self.pool).await?;
                 sqlx::query("INSERT INTO _migrations (version, name) VALUES (?, ?)")
                     .bind(migration.version)
                     .bind(migration.name)
@@ -109,7 +113,8 @@ impl Database {
             .fetch_all(&self.pool)
             .await?;
 
-        let settings_map: std::collections::HashMap<String, String> = settings.into_iter().collect();
+        let settings_map: std::collections::HashMap<String, String> =
+            settings.into_iter().collect();
 
         Ok(self.build_runtime_config(&settings_map))
     }
@@ -123,28 +128,34 @@ impl Database {
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(settings.into_iter().map(|r| SettingItem {
-            key: r.key,
-            category: r.category,
-            value: r.value,
-            description: r.description,
-        }).collect())
+        Ok(settings
+            .into_iter()
+            .map(|r| SettingItem {
+                key: r.key,
+                category: r.category,
+                value: r.value,
+                description: r.description,
+            })
+            .collect())
     }
 
     /// 获取所有设置
     pub async fn get_all_settings(&self) -> Result<Vec<SettingItem>> {
         let settings = sqlx::query_as::<_, SettingRow>(
-            "SELECT key, category, value, description FROM settings ORDER BY category, key"
+            "SELECT key, category, value, description FROM settings ORDER BY category, key",
         )
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(settings.into_iter().map(|r| SettingItem {
-            key: r.key,
-            category: r.category,
-            value: r.value,
-            description: r.description,
-        }).collect())
+        Ok(settings
+            .into_iter()
+            .map(|r| SettingItem {
+                key: r.key,
+                category: r.category,
+                value: r.value,
+                description: r.description,
+            })
+            .collect())
     }
 
     /// 更新设置
@@ -157,7 +168,10 @@ impl Database {
         Ok(())
     }
 
-    fn build_runtime_config(&self, settings_map: &std::collections::HashMap<String, String>) -> RuntimeConfig {
+    fn build_runtime_config(
+        &self,
+        settings_map: &std::collections::HashMap<String, String>,
+    ) -> RuntimeConfig {
         let top_k = settings_map
             .get("scheduler.top_k")
             .and_then(|v| v.parse().ok())

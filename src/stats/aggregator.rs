@@ -1,7 +1,7 @@
+use chrono::Timelike;
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use tokio::time::{interval, Duration};
-use chrono::Timelike;
 
 /// 统计聚合器
 pub struct StatsAggregator {
@@ -80,7 +80,7 @@ impl StatsAggregator {
                 cache_read_tokens = excluded.cache_read_tokens,
                 cache_creation_tokens = excluded.cache_creation_tokens,
                 total_cost = excluded.total_cost
-            "#
+            "#,
         )
         .bind(&yesterday)
         .execute(&self.pool)

@@ -21,12 +21,11 @@ async fn test_database_init() {
 
     let db = galaxy_proxy::db::Database::new(&db_url).await.unwrap();
 
-    let tables: Vec<String> = sqlx::query_scalar(
-        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-    )
-    .fetch_all(db.pool())
-    .await
-    .unwrap();
+    let tables: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .fetch_all(db.pool())
+            .await
+            .unwrap();
 
     assert!(tables.contains(&"users".to_string()));
     assert!(tables.contains(&"channels".to_string()));
@@ -81,25 +80,22 @@ async fn test_channel_multi_endpoint() {
         {"type": "anthropic", "base_url": "https://coding.dashscope.aliyuncs.com/apps/anthropic/v1"}
     ]"#;
 
-    sqlx::query(
-        "INSERT INTO channels (id, name, api_keys, endpoints) VALUES (?, ?, ?, ?)"
-    )
-    .bind(&channel_id)
-    .bind("百炼 Coding Plan")
-    .bind(r#"["sk-test-key"]"#)
-    .bind(endpoints)
-    .execute(&pool)
-    .await
-    .unwrap();
+    sqlx::query("INSERT INTO channels (id, name, api_keys, endpoints) VALUES (?, ?, ?, ?)")
+        .bind(&channel_id)
+        .bind("百炼 Coding Plan")
+        .bind(r#"["sk-test-key"]"#)
+        .bind(endpoints)
+        .execute(&pool)
+        .await
+        .unwrap();
 
     // 查询渠道
-    let (name, api_keys, endpoints_str): (String, String, String) = sqlx::query_as(
-        "SELECT name, api_keys, endpoints FROM channels WHERE id = ?"
-    )
-    .bind(&channel_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let (name, api_keys, endpoints_str): (String, String, String) =
+        sqlx::query_as("SELECT name, api_keys, endpoints FROM channels WHERE id = ?")
+            .bind(&channel_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
 
     assert_eq!(name, "百炼 Coding Plan");
     assert_eq!(api_keys, r#"["sk-test-key"]"#);
@@ -128,24 +124,20 @@ async fn test_channel_single_endpoint() {
     let channel_id = uuid::Uuid::now_v7().to_string();
     let endpoints = r#"[{"type": "openai_chat", "base_url": "https://api.openai.com/v1"}]"#;
 
-    sqlx::query(
-        "INSERT INTO channels (id, name, api_keys, endpoints) VALUES (?, ?, ?, ?)"
-    )
-    .bind(&channel_id)
-    .bind("OpenAI Official")
-    .bind(r#"["sk-xxx"]"#)
-    .bind(endpoints)
-    .execute(&pool)
-    .await
-    .unwrap();
+    sqlx::query("INSERT INTO channels (id, name, api_keys, endpoints) VALUES (?, ?, ?, ?)")
+        .bind(&channel_id)
+        .bind("OpenAI Official")
+        .bind(r#"["sk-xxx"]"#)
+        .bind(endpoints)
+        .execute(&pool)
+        .await
+        .unwrap();
 
-    let endpoints_str: String = sqlx::query_scalar(
-        "SELECT endpoints FROM channels WHERE id = ?"
-    )
-    .bind(&channel_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let endpoints_str: String = sqlx::query_scalar("SELECT endpoints FROM channels WHERE id = ?")
+        .bind(&channel_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
 
     let parsed: Vec<serde_json::Value> = serde_json::from_str(&endpoints_str).unwrap();
     assert_eq!(parsed.len(), 1);
@@ -171,27 +163,23 @@ async fn test_group_with_channel() {
 
     // 创建渠道
     let channel_id = uuid::Uuid::now_v7().to_string();
-    sqlx::query(
-        "INSERT INTO channels (id, name, api_keys, endpoints) VALUES (?, ?, ?, ?)"
-    )
-    .bind(&channel_id)
-    .bind("test-channel")
-    .bind(r#"["sk-test"]"#)
-    .bind(r#"[{"type":"openai_chat","base_url":"https://api.openai.com/v1"}]"#)
-    .execute(&pool)
-    .await
-    .unwrap();
+    sqlx::query("INSERT INTO channels (id, name, api_keys, endpoints) VALUES (?, ?, ?, ?)")
+        .bind(&channel_id)
+        .bind("test-channel")
+        .bind(r#"["sk-test"]"#)
+        .bind(r#"[{"type":"openai_chat","base_url":"https://api.openai.com/v1"}]"#)
+        .execute(&pool)
+        .await
+        .unwrap();
 
     // 创建分组
     let group_id = uuid::Uuid::now_v7().to_string();
-    sqlx::query(
-        "INSERT INTO groups (id, name) VALUES (?, ?)"
-    )
-    .bind(&group_id)
-    .bind("gpt-4o")
-    .execute(&pool)
-    .await
-    .unwrap();
+    sqlx::query("INSERT INTO groups (id, name) VALUES (?, ?)")
+        .bind(&group_id)
+        .bind("gpt-4o")
+        .execute(&pool)
+        .await
+        .unwrap();
 
     // 添加分组项
     let item_id = uuid::Uuid::now_v7().to_string();
@@ -209,22 +197,18 @@ async fn test_group_with_channel() {
     .unwrap();
 
     // 验证分组和分组项
-    let group_name: String = sqlx::query_scalar(
-        "SELECT name FROM groups WHERE id = ?"
-    )
-    .bind(&group_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let group_name: String = sqlx::query_scalar("SELECT name FROM groups WHERE id = ?")
+        .bind(&group_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert_eq!(group_name, "gpt-4o");
 
-    let item_count: i32 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM group_items WHERE group_id = ?"
-    )
-    .bind(&group_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let item_count: i32 = sqlx::query_scalar("SELECT COUNT(*) FROM group_items WHERE group_id = ?")
+        .bind(&group_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert_eq!(item_count, 1);
 
     let _ = std::fs::remove_dir_all("/tmp/galaxy_test_group_channel");
@@ -248,33 +232,27 @@ async fn test_api_key_crud() {
     let key_id = uuid::Uuid::now_v7().to_string();
     let api_key = format!("gp-{}", uuid::Uuid::now_v7());
 
-    sqlx::query(
-        "INSERT INTO api_keys (id, name, api_key, enabled) VALUES (?, ?, ?, ?)"
-    )
-    .bind(&key_id)
-    .bind("test-key")
-    .bind(&api_key)
-    .bind(true)
-    .execute(&pool)
-    .await
-    .unwrap();
+    sqlx::query("INSERT INTO api_keys (id, name, api_key, enabled) VALUES (?, ?, ?, ?)")
+        .bind(&key_id)
+        .bind("test-key")
+        .bind(&api_key)
+        .bind(true)
+        .execute(&pool)
+        .await
+        .unwrap();
 
-    let fetched_name: String = sqlx::query_scalar(
-        "SELECT name FROM api_keys WHERE id = ?"
-    )
-    .bind(&key_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let fetched_name: String = sqlx::query_scalar("SELECT name FROM api_keys WHERE id = ?")
+        .bind(&key_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert_eq!(fetched_name, "test-key");
 
-    let enabled: bool = sqlx::query_scalar(
-        "SELECT enabled FROM api_keys WHERE api_key = ?"
-    )
-    .bind(&api_key)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let enabled: bool = sqlx::query_scalar("SELECT enabled FROM api_keys WHERE api_key = ?")
+        .bind(&api_key)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert!(enabled);
 
     let _ = std::fs::remove_dir_all("/tmp/galaxy_test_api_key");
@@ -300,17 +278,21 @@ fn test_openai_chat_transform() {
         "stream": false
     }"#;
 
-    let request = tokio_test::block_on(inbound.transform_request(body.as_bytes(), &headers)).unwrap();
+    let request =
+        tokio_test::block_on(inbound.transform_request(body.as_bytes(), &headers)).unwrap();
 
     assert_eq!(request.model, "gpt-4o");
     assert_eq!(request.messages.len(), 1);
-    assert_eq!(request.messages[0].role, galaxy_proxy::protocol::model::Role::User);
+    assert_eq!(
+        request.messages[0].role,
+        galaxy_proxy::protocol::model::Role::User
+    );
 }
 
 #[test]
 fn test_anthropic_transform() {
-    use galaxy_proxy::protocol::inbound::Inbound;
     use galaxy_proxy::protocol::anthropic::AnthropicInbound;
+    use galaxy_proxy::protocol::inbound::Inbound;
 
     let inbound = AnthropicInbound;
     let headers = axum::http::HeaderMap::new();
@@ -323,7 +305,8 @@ fn test_anthropic_transform() {
         ]
     }"#;
 
-    let request = tokio_test::block_on(inbound.transform_request(body.as_bytes(), &headers)).unwrap();
+    let request =
+        tokio_test::block_on(inbound.transform_request(body.as_bytes(), &headers)).unwrap();
 
     assert_eq!(request.model, "claude-sonnet-4-20250514");
     assert_eq!(request.messages.len(), 1);

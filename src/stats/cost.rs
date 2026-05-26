@@ -1,7 +1,7 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use serde::{Deserialize, Serialize};
 
 /// 模型定价
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +42,12 @@ pub struct CostCalculator {
     http_client: reqwest::Client,
 }
 
+impl Default for CostCalculator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CostCalculator {
     pub fn new() -> Self {
         Self {
@@ -61,13 +67,16 @@ impl CostCalculator {
 
         let mut local = self.local_pricing.write().await;
         for (model, input, output, cache_read, cache_creation) in pricing {
-            local.insert(model.clone(), ModelPricing {
-                model,
-                input_per_million: input,
-                output_per_million: output,
-                cache_read_per_million: cache_read,
-                cache_creation_per_million: cache_creation,
-            });
+            local.insert(
+                model.clone(),
+                ModelPricing {
+                    model,
+                    input_per_million: input,
+                    output_per_million: output,
+                    cache_read_per_million: cache_read,
+                    cache_creation_per_million: cache_creation,
+                },
+            );
         }
 
         Ok(())
@@ -75,7 +84,8 @@ impl CostCalculator {
 
     /// 从 models.dev 拉取定价
     pub async fn fetch_remote_pricing(&self) -> Result<(), reqwest::Error> {
-        let response = self.http_client
+        let response = self
+            .http_client
             .get("https://models.dev/api.json")
             .send()
             .await?
@@ -85,20 +95,25 @@ impl CostCalculator {
         let mut remote = self.remote_pricing.write().await;
         for model in response.models {
             if let Some(pricing) = model.pricing {
-                let input = pricing.prompt
+                let input = pricing
+                    .prompt
                     .and_then(|s| s.parse::<f64>().ok())
                     .unwrap_or(0.0);
-                let output = pricing.completion
+                let output = pricing
+                    .completion
                     .and_then(|s| s.parse::<f64>().ok())
                     .unwrap_or(0.0);
 
-                remote.insert(model.id.clone(), ModelPricing {
-                    model: model.id,
-                    input_per_million: input,
-                    output_per_million: output,
-                    cache_read_per_million: None,
-                    cache_creation_per_million: None,
-                });
+                remote.insert(
+                    model.id.clone(),
+                    ModelPricing {
+                        model: model.id,
+                        input_per_million: input,
+                        output_per_million: output,
+                        cache_read_per_million: None,
+                        cache_creation_per_million: None,
+                    },
+                );
             }
         }
 
@@ -119,7 +134,7 @@ impl CostCalculator {
                     output_per_million = excluded.output_per_million,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE source = 'models.dev'
-                "#
+                "#,
             )
             .bind(&pricing.model)
             .bind(pricing.input_per_million)
@@ -143,20 +158,38 @@ impl CostCalculator {
         // 优先使用本地定价
         let local = self.local_pricing.read().await;
         if let Some(pricing) = local.get(model) {
-            return self.compute_cost(pricing, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens);
+            return self.compute_cost(
+                pricing,
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                cache_creation_tokens,
+            );
         }
 
         // 然后使用远程定价
         let remote = self.remote_pricing.read().await;
         if let Some(pricing) = remote.get(model) {
-            return self.compute_cost(pricing, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens);
+            return self.compute_cost(
+                pricing,
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                cache_creation_tokens,
+            );
         }
 
         // 模糊匹配（移除版本后缀）
         let base_model = model.rsplitn(2, '-').last().unwrap_or(model);
         for (key, pricing) in remote.iter() {
             if key.starts_with(base_model) || base_model.starts_with(key.as_str()) {
-                return self.compute_cost(pricing, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens);
+                return self.compute_cost(
+                    pricing,
+                    input_tokens,
+                    output_tokens,
+                    cache_read_tokens,
+                    cache_creation_tokens,
+                );
             }
         }
 

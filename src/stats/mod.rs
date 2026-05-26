@@ -1,15 +1,18 @@
-pub mod recorder;
 pub mod aggregator;
 pub mod cost;
+pub mod recorder;
 
-use sqlx::SqlitePool;
 use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
 
 /// 统计状态
 #[derive(Clone)]
 pub struct StatsState {
     pub pool: SqlitePool,
 }
+
+/// 渠道统计行类型
+type ChannelStatsRow = (String, String, i32, i32, i32, i32, i32, f64);
 
 /// 用量日志
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -102,7 +105,7 @@ impl StatsState {
                 COALESCE(SUM(input_tokens), 0),
                 COALESCE(SUM(output_tokens), 0),
                 COALESCE(SUM(total_cost), 0)
-            FROM usage_daily"
+            FROM usage_daily",
         )
         .fetch_one(&self.pool)
         .await?;
@@ -115,7 +118,7 @@ impl StatsState {
                 COALESCE(SUM(output_tokens), 0),
                 COALESCE(SUM(total_cost), 0)
             FROM usage_daily
-            WHERE date = ?"
+            WHERE date = ?",
         )
         .bind(&today)
         .fetch_one(&self.pool)
@@ -149,21 +152,22 @@ impl StatsState {
             FROM usage_daily
             WHERE date >= ?
             GROUP BY model
-            ORDER BY SUM(request_count) DESC"
+            ORDER BY SUM(request_count) DESC",
         )
         .bind(&start_date)
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(stats.into_iter().map(|(model, requests, input, output, cost)| {
-            ModelStats {
+        Ok(stats
+            .into_iter()
+            .map(|(model, requests, input, output, cost)| ModelStats {
                 model,
                 request_count: requests,
                 input_tokens: input,
                 output_tokens: output,
                 total_cost: cost,
-            }
-        }).collect())
+            })
+            .collect())
     }
 
     /// 获取按渠道统计
@@ -172,7 +176,7 @@ impl StatsState {
             .format("%Y-%m-%d")
             .to_string();
 
-        let rows: Vec<(String, String, i32, i32, i32, i32, i32, f64)> = sqlx::query_as(
+        let rows: Vec<ChannelStatsRow> = sqlx::query_as(
             "SELECT
                 u.channel_id,
                 COALESCE(c.name, 'unknown'),
@@ -186,24 +190,27 @@ impl StatsState {
             LEFT JOIN channels c ON u.channel_id = c.id
             WHERE u.date >= ?
             GROUP BY u.channel_id
-            ORDER BY SUM(u.request_count) DESC"
+            ORDER BY SUM(u.request_count) DESC",
         )
         .bind(&start_date)
         .fetch_all(&self.pool)
         .await?;
 
-        let stats = rows.into_iter().map(|(id, name, requests, success, failure, input, output, cost)| {
-            ChannelStats {
-                channel_id: id,
-                channel_name: name,
-                request_count: requests,
-                success_count: success,
-                failure_count: failure,
-                input_tokens: input,
-                output_tokens: output,
-                total_cost: cost,
-            }
-        }).collect();
+        let stats = rows
+            .into_iter()
+            .map(
+                |(id, name, requests, success, failure, input, output, cost)| ChannelStats {
+                    channel_id: id,
+                    channel_name: name,
+                    request_count: requests,
+                    success_count: success,
+                    failure_count: failure,
+                    input_tokens: input,
+                    output_tokens: output,
+                    total_cost: cost,
+                },
+            )
+            .collect();
 
         Ok(stats)
     }

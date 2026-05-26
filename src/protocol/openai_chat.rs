@@ -85,60 +85,72 @@ struct OpenAiFunctionDefinition {
 
 #[async_trait]
 impl Inbound for OpenAiChatInbound {
-    async fn transform_request(&self, body: &[u8], _headers: &HeaderMap) -> Result<LlmRequest, InboundError> {
+    async fn transform_request(
+        &self,
+        body: &[u8],
+        _headers: &HeaderMap,
+    ) -> Result<LlmRequest, InboundError> {
         let request: OpenAiChatRequest = serde_json::from_slice(body)
             .map_err(|e| InboundError::ParseError(format!("解析 OpenAI Chat 请求失败: {}", e)))?;
 
-        let messages = request.messages.into_iter().map(|m| {
-            let role = match m.role.as_str() {
-                "system" => Role::System,
-                "user" => Role::User,
-                "assistant" => Role::Assistant,
-                "tool" => Role::Tool,
-                "developer" => Role::Developer,
-                _ => Role::User,
-            };
+        let messages = request
+            .messages
+            .into_iter()
+            .map(|m| {
+                let role = match m.role.as_str() {
+                    "system" => Role::System,
+                    "user" => Role::User,
+                    "assistant" => Role::Assistant,
+                    "tool" => Role::Tool,
+                    "developer" => Role::Developer,
+                    _ => Role::User,
+                };
 
-            let content = m.content.map(|c| {
-                if let Some(s) = c.as_str() {
-                    Content::Text(s.to_string())
-                } else {
-                    Content::Parts(vec![ContentPart::Text {
-                        text: serde_json::to_string(&c).unwrap_or_default(),
-                    }])
+                let content = m.content.map(|c| {
+                    if let Some(s) = c.as_str() {
+                        Content::Text(s.to_string())
+                    } else {
+                        Content::Parts(vec![ContentPart::Text {
+                            text: serde_json::to_string(&c).unwrap_or_default(),
+                        }])
+                    }
+                });
+
+                let tool_calls = m.tool_calls.map(|tc| {
+                    tc.into_iter()
+                        .map(|t| ToolCall {
+                            id: t.id,
+                            call_type: t.call_type,
+                            function: FunctionCall {
+                                name: t.function.name,
+                                arguments: t.function.arguments,
+                            },
+                        })
+                        .collect()
+                });
+
+                Message {
+                    role,
+                    content,
+                    name: m.name,
+                    tool_calls,
+                    tool_call_id: m.tool_call_id,
+                    reasoning_content: None,
                 }
-            });
-
-            let tool_calls = m.tool_calls.map(|tc| {
-                tc.into_iter().map(|t| ToolCall {
-                    id: t.id,
-                    call_type: t.call_type,
-                    function: FunctionCall {
-                        name: t.function.name,
-                        arguments: t.function.arguments,
-                    },
-                }).collect()
-            });
-
-            Message {
-                role,
-                content,
-                name: m.name,
-                tool_calls,
-                tool_call_id: m.tool_call_id,
-                reasoning_content: None,
-            }
-        }).collect();
+            })
+            .collect();
 
         let tools = request.tools.map(|t| {
-            t.into_iter().map(|tool| Tool {
-                tool_type: tool.tool_type,
-                function: FunctionDefinition {
-                    name: tool.function.name,
-                    description: tool.function.description,
-                    parameters: tool.function.parameters,
-                },
-            }).collect()
+            t.into_iter()
+                .map(|tool| Tool {
+                    tool_type: tool.tool_type,
+                    function: FunctionDefinition {
+                        name: tool.function.name,
+                        description: tool.function.description,
+                        parameters: tool.function.parameters,
+                    },
+                })
+                .collect()
         });
 
         let tool_choice = request.tool_choice.and_then(|tc| {
@@ -153,7 +165,9 @@ impl Inbound for OpenAiChatInbound {
                     .and_then(|f| f.get("name"))
                     .and_then(|n| n.as_str())
                     .map(|name| ToolChoice::Function {
-                        function: FunctionName { name: name.to_string() },
+                        function: FunctionName {
+                            name: name.to_string(),
+                        },
                     })
             }
         });
@@ -193,51 +207,59 @@ impl Inbound for OpenAiChatInbound {
 #[async_trait]
 impl Outbound for OpenAiChatOutbound {
     fn transform_request(&self, request: &LlmRequest) -> Result<Vec<u8>, OutboundError> {
-        let messages: Vec<OpenAiMessage> = request.messages.iter().map(|m| {
-            let role = match m.role {
-                Role::System => "system",
-                Role::User => "user",
-                Role::Assistant => "assistant",
-                Role::Tool => "tool",
-                Role::Developer => "developer",
-            };
+        let messages: Vec<OpenAiMessage> = request
+            .messages
+            .iter()
+            .map(|m| {
+                let role = match m.role {
+                    Role::System => "system",
+                    Role::User => "user",
+                    Role::Assistant => "assistant",
+                    Role::Tool => "tool",
+                    Role::Developer => "developer",
+                };
 
-            let content = m.content.as_ref().map(|c| match c {
-                Content::Text(s) => serde_json::Value::String(s.clone()),
-                Content::Parts(parts) => {
-                    serde_json::to_value(parts).unwrap_or(serde_json::Value::Null)
+                let content = m.content.as_ref().map(|c| match c {
+                    Content::Text(s) => serde_json::Value::String(s.clone()),
+                    Content::Parts(parts) => {
+                        serde_json::to_value(parts).unwrap_or(serde_json::Value::Null)
+                    }
+                });
+
+                let tool_calls = m.tool_calls.as_ref().map(|tc| {
+                    tc.iter()
+                        .map(|t| OpenAiToolCall {
+                            id: t.id.clone(),
+                            call_type: t.call_type.clone(),
+                            function: OpenAiFunctionCall {
+                                name: t.function.name.clone(),
+                                arguments: t.function.arguments.clone(),
+                            },
+                        })
+                        .collect()
+                });
+
+                OpenAiMessage {
+                    role: role.to_string(),
+                    content,
+                    name: m.name.clone(),
+                    tool_calls,
+                    tool_call_id: m.tool_call_id.clone(),
                 }
-            });
-
-            let tool_calls = m.tool_calls.as_ref().map(|tc| {
-                tc.iter().map(|t| OpenAiToolCall {
-                    id: t.id.clone(),
-                    call_type: t.call_type.clone(),
-                    function: OpenAiFunctionCall {
-                        name: t.function.name.clone(),
-                        arguments: t.function.arguments.clone(),
-                    },
-                }).collect()
-            });
-
-            OpenAiMessage {
-                role: role.to_string(),
-                content,
-                name: m.name.clone(),
-                tool_calls,
-                tool_call_id: m.tool_call_id.clone(),
-            }
-        }).collect();
+            })
+            .collect();
 
         let tools: Option<Vec<OpenAiTool>> = request.tools.as_ref().map(|t| {
-            t.iter().map(|tool| OpenAiTool {
-                tool_type: tool.tool_type.clone(),
-                function: OpenAiFunctionDefinition {
-                    name: tool.function.name.clone(),
-                    description: tool.function.description.clone(),
-                    parameters: tool.function.parameters.clone(),
-                },
-            }).collect()
+            t.iter()
+                .map(|tool| OpenAiTool {
+                    tool_type: tool.tool_type.clone(),
+                    function: OpenAiFunctionDefinition {
+                        name: tool.function.name.clone(),
+                        description: tool.function.description.clone(),
+                        parameters: tool.function.parameters.clone(),
+                    },
+                })
+                .collect()
         });
 
         let tool_choice = request.tool_choice.as_ref().map(|tc| match tc {
@@ -266,12 +288,19 @@ impl Outbound for OpenAiChatOutbound {
             .map_err(|e| OutboundError::TransformError(format!("序列化请求失败: {}", e)))
     }
 
-    async fn transform_response(&self, body: &[u8], _status: u16) -> Result<LlmResponse, OutboundError> {
+    async fn transform_response(
+        &self,
+        body: &[u8],
+        _status: u16,
+    ) -> Result<LlmResponse, OutboundError> {
         serde_json::from_slice(body)
             .map_err(|e| OutboundError::ParseError(format!("解析 OpenAI Chat 响应失败: {}", e)))
     }
 
-    fn transform_stream_event(&self, event: &[u8]) -> Result<Option<LlmStreamResponse>, OutboundError> {
+    fn transform_stream_event(
+        &self,
+        event: &[u8],
+    ) -> Result<Option<LlmStreamResponse>, OutboundError> {
         let text = String::from_utf8_lossy(event);
         let text = text.trim();
 

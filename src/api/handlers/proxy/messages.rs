@@ -1,4 +1,9 @@
-use axum::{extract::State, http::{HeaderMap, StatusCode}, response::IntoResponse, Json};
+use axum::{
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    response::IntoResponse,
+    Json,
+};
 use serde_json::Value;
 
 use crate::api::handlers::admin::channels::EndpointType;
@@ -14,19 +19,27 @@ pub async fn proxy(
     let is_stream = body["stream"].as_bool().unwrap_or(false);
 
     // 获取 session_hash
-    let session_hash = headers.get("x-session-hash")
+    let session_hash = headers
+        .get("x-session-hash")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string())
         .or_else(|| body["session_hash"].as_str().map(|s| s.to_string()));
 
     // 选择渠道
-    let selection = match state.select_channel(model, EndpointType::Anthropic, session_hash.as_deref()).await {
+    let selection = match state
+        .select_channel(model, EndpointType::Anthropic, session_hash.as_deref())
+        .await
+    {
         Ok(s) => s,
         Err(e) => {
-            return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
-                "type": "error",
-                "error": { "type": "api_error", "message": e.to_string() }
-            }))).into_response();
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "type": "error",
+                    "error": { "type": "api_error", "message": e.to_string() }
+                })),
+            )
+                .into_response();
         }
     };
 
@@ -44,14 +57,20 @@ pub async fn proxy(
     reqwest_headers.insert("anthropic-version", "2023-06-01".parse().unwrap());
 
     // 构建 URL
-    let url = format!("{}{}", selection.endpoint.base_url, EndpointType::Anthropic.path());
+    let url = format!(
+        "{}{}",
+        selection.endpoint.base_url,
+        EndpointType::Anthropic.path()
+    );
 
     let start_time = std::time::Instant::now();
     let channel_id = selection.channel.id.clone();
 
     // 发送请求
     if is_stream {
-        match state.http_client.post(&url)
+        match state
+            .http_client
+            .post(&url)
             .headers(reqwest_headers)
             .body(request_body.to_string())
             .send()
@@ -62,15 +81,25 @@ pub async fn proxy(
                     let status = response.status();
                     let body = response.text().await.unwrap_or_default();
 
-                    state.lb_state.record_failure(&channel_id, status.is_server_error()).await;
+                    state
+                        .lb_state
+                        .record_failure(&channel_id, status.is_server_error())
+                        .await;
 
-                    return (status, Json(serde_json::json!({
-                        "type": "error",
-                        "error": { "type": "api_error", "message": body }
-                    }))).into_response();
+                    return (
+                        status,
+                        Json(serde_json::json!({
+                            "type": "error",
+                            "error": { "type": "api_error", "message": body }
+                        })),
+                    )
+                        .into_response();
                 }
 
-                state.lb_state.record_success(&channel_id, start_time.elapsed().as_millis() as f64).await;
+                state
+                    .lb_state
+                    .record_success(&channel_id, start_time.elapsed().as_millis() as f64)
+                    .await;
 
                 let stream = response.bytes_stream();
                 use futures::StreamExt;
@@ -79,7 +108,7 @@ pub async fn proxy(
                     let mut stream = std::pin::pin!(stream);
                     while let Some(chunk) = stream.next().await {
                         match chunk {
-                            Ok(bytes) => yield Ok::<_, std::convert::Infallible>(axum::body::Bytes::from(bytes)),
+                            Ok(bytes) => yield Ok::<_, std::convert::Infallible>(bytes),
                             Err(e) => {
                                 tracing::error!("Stream error: {}", e);
                                 break;
@@ -100,14 +129,20 @@ pub async fn proxy(
             Err(e) => {
                 state.lb_state.record_failure(&channel_id, true).await;
 
-                (StatusCode::BAD_GATEWAY, Json(serde_json::json!({
-                    "type": "error",
-                    "error": { "type": "api_error", "message": format!("请求上游失败: {}", e) }
-                }))).into_response()
+                (
+                    StatusCode::BAD_GATEWAY,
+                    Json(serde_json::json!({
+                        "type": "error",
+                        "error": { "type": "api_error", "message": format!("请求上游失败: {}", e) }
+                    })),
+                )
+                    .into_response()
             }
         }
     } else {
-        match state.http_client.post(&url)
+        match state
+            .http_client
+            .post(&url)
             .headers(reqwest_headers)
             .body(request_body.to_string())
             .send()
@@ -118,25 +153,39 @@ pub async fn proxy(
                 let body = response.text().await.unwrap_or_default();
 
                 if !status.is_success() {
-                    state.lb_state.record_failure(&channel_id, status.is_server_error()).await;
+                    state
+                        .lb_state
+                        .record_failure(&channel_id, status.is_server_error())
+                        .await;
 
-                    return (status, Json(serde_json::json!({
-                        "type": "error",
-                        "error": { "type": "api_error", "message": body }
-                    }))).into_response();
+                    return (
+                        status,
+                        Json(serde_json::json!({
+                            "type": "error",
+                            "error": { "type": "api_error", "message": body }
+                        })),
+                    )
+                        .into_response();
                 }
 
-                state.lb_state.record_success(&channel_id, start_time.elapsed().as_millis() as f64).await;
+                state
+                    .lb_state
+                    .record_success(&channel_id, start_time.elapsed().as_millis() as f64)
+                    .await;
 
                 (StatusCode::OK, axum::response::Html(body)).into_response()
             }
             Err(e) => {
                 state.lb_state.record_failure(&channel_id, true).await;
 
-                (StatusCode::BAD_GATEWAY, Json(serde_json::json!({
-                    "type": "error",
-                    "error": { "type": "api_error", "message": format!("请求上游失败: {}", e) }
-                }))).into_response()
+                (
+                    StatusCode::BAD_GATEWAY,
+                    Json(serde_json::json!({
+                        "type": "error",
+                        "error": { "type": "api_error", "message": format!("请求上游失败: {}", e) }
+                    })),
+                )
+                    .into_response()
             }
         }
     }

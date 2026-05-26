@@ -256,7 +256,8 @@ impl LlmStreamResponse {
 
     /// 是否是结束事件
     pub fn is_done(&self) -> bool {
-        self.choices.first()
+        self.choices
+            .first()
             .and_then(|c| c.finish_reason.as_ref())
             .is_some()
     }

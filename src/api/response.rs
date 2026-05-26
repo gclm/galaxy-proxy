@@ -1,5 +1,5 @@
-use axum::{http::StatusCode, Json, response::IntoResponse};
-use serde::{Deserialize, Serialize};
+use axum::{http::StatusCode, response::IntoResponse, Json};
+use serde::Serialize;
 
 /// 统一成功响应
 #[derive(Debug, Serialize)]
@@ -71,7 +71,10 @@ impl ApiError {
 
     /// 服务器内部错误
     pub fn internal_error(message: impl Into<String>) -> (StatusCode, Json<Self>) {
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(Self::new(500, message)))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(Self::new(500, message)),
+        )
     }
 }
 

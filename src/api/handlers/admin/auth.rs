@@ -87,13 +87,18 @@ pub async fn setup(
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
     // 生成 Token
-    let token = state.jwt_service.generate_token(&user_id, &req.username)
+    let token = state
+        .jwt_service
+        .generate_token(&user_id, &req.username)
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
-    Ok((StatusCode::CREATED, Json(ApiResponse::success(AuthResponse {
-        token,
-        expires_in: 86400,
-    }))))
+    Ok((
+        StatusCode::CREATED,
+        Json(ApiResponse::success(AuthResponse {
+            token,
+            expires_in: 86400,
+        })),
+    ))
 }
 
 /// 登录
@@ -103,15 +108,15 @@ pub async fn login(
 ) -> Result<Json<ApiResponse<AuthResponse>>, (StatusCode, Json<ApiError>)> {
     // 查询用户
     let user = sqlx::query_as::<_, (String, String, String)>(
-        "SELECT id, username, password_hash FROM users WHERE username = ?"
+        "SELECT id, username, password_hash FROM users WHERE username = ?",
     )
     .bind(&req.username)
     .fetch_optional(&state.pool)
     .await
     .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
-    let (user_id, username, password_hash) = user
-        .ok_or_else(|| ApiError::unauthorized("用户名或密码错误"))?;
+    let (user_id, username, password_hash) =
+        user.ok_or_else(|| ApiError::unauthorized("用户名或密码错误"))?;
 
     // 验证密码
     let valid = PasswordService::verify_password(&req.password, &password_hash)
@@ -122,7 +127,9 @@ pub async fn login(
     }
 
     // 生成 Token
-    let token = state.jwt_service.generate_token(&user_id, &username)
+    let token = state
+        .jwt_service
+        .generate_token(&user_id, &username)
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
     Ok(Json(ApiResponse::success(AuthResponse {

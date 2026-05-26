@@ -1,7 +1,7 @@
+use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use chrono::{DateTime, Utc};
 
 /// 渠道状态
 #[derive(Debug, Clone)]
@@ -105,6 +105,12 @@ pub struct LoadBalancerState {
     pub blacklist_minutes: i64,
 }
 
+impl Default for LoadBalancerState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LoadBalancerState {
     pub fn new() -> Self {
         Self {
@@ -119,7 +125,8 @@ impl LoadBalancerState {
     /// 获取或创建渠道状态
     pub async fn get_or_create_channel_status(&self, channel_id: &str) -> ChannelStatus {
         let mut states = self.channel_states.write().await;
-        states.entry(channel_id.to_string())
+        states
+            .entry(channel_id.to_string())
             .or_insert_with(|| ChannelStatus::new(channel_id.to_string()))
             .clone()
     }
@@ -188,12 +195,15 @@ impl LoadBalancerState {
     pub async fn set_sticky_session(&self, session_hash: &str, channel_id: &str) {
         let mut sessions = self.sticky_sessions.write().await;
         let now = Utc::now();
-        sessions.insert(session_hash.to_string(), StickySession {
-            session_hash: session_hash.to_string(),
-            channel_id: channel_id.to_string(),
-            created_at: now,
-            expires_at: now + chrono::Duration::seconds(self.sticky_ttl_secs),
-        });
+        sessions.insert(
+            session_hash.to_string(),
+            StickySession {
+                session_hash: session_hash.to_string(),
+                channel_id: channel_id.to_string(),
+                created_at: now,
+                expires_at: now + chrono::Duration::seconds(self.sticky_ttl_secs),
+            },
+        );
     }
 
     /// 清理过期的粘性会话

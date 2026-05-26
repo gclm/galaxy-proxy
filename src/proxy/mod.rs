@@ -1,9 +1,9 @@
 pub mod scheduler;
 pub mod state;
 
-use sqlx::SqlitePool;
 use self::state::LoadBalancerState;
 use crate::api::handlers::admin::channels::{EndpointConfig, EndpointType};
+use sqlx::SqlitePool;
 
 /// 代理状态
 #[derive(Clone)]
@@ -116,7 +116,9 @@ impl ProxyState {
         }
 
         // 5. 如果没有分组匹配，尝试直接查找渠道
-        let channel = self.find_channel_by_model_and_type(model, &endpoint_type).await?;
+        let channel = self
+            .find_channel_by_model_and_type(model, &endpoint_type)
+            .await?;
 
         if let Some(endpoint) = channel.find_endpoint(&endpoint_type) {
             // 设置粘性会话
@@ -138,7 +140,7 @@ impl ProxyState {
     /// 根据名称查找分组
     async fn find_group_by_name(&self, name: &str) -> Result<Option<GroupInfo>, ProxyError> {
         let result = sqlx::query_as::<_, (String, String)>(
-            "SELECT id, name FROM groups WHERE name = ? AND enabled = 1"
+            "SELECT id, name FROM groups WHERE name = ? AND enabled = 1",
         )
         .bind(name)
         .fetch_optional(&self.pool)
@@ -187,34 +189,42 @@ impl ProxyState {
         .await
         .map_err(|e| ProxyError::DatabaseError(e.to_string()))?;
 
-        Ok(items.into_iter().map(|(channel_id, model_name, priority, weight)| {
-            GroupItemInfo {
+        Ok(items
+            .into_iter()
+            .map(|(channel_id, model_name, priority, weight)| GroupItemInfo {
                 channel_id,
                 model_name,
                 priority,
                 weight,
-            }
-        }).collect())
+            })
+            .collect())
     }
 
     /// 从分组中选择一个渠道项（自适应负载均衡）
     async fn select_group_item(&self, group: &GroupInfo) -> Result<GroupItemInfo, ProxyError> {
         if group.items.is_empty() {
-            return Err(ProxyError::NoAvailableChannel("分组没有可用渠道".to_string()));
+            return Err(ProxyError::NoAvailableChannel(
+                "分组没有可用渠道".to_string(),
+            ));
         }
 
         // 计算每个渠道的评分
         let mut scored_items: Vec<(f64, &GroupItemInfo)> = Vec::new();
 
         for item in &group.items {
-            let score = self.lb_state.calculate_score(&item.channel_id, item.weight).await;
+            let score = self
+                .lb_state
+                .calculate_score(&item.channel_id, item.weight)
+                .await;
             if score > 0.0 {
                 scored_items.push((score, item));
             }
         }
 
         if scored_items.is_empty() {
-            return Err(ProxyError::NoAvailableChannel("所有渠道都不可用".to_string()));
+            return Err(ProxyError::NoAvailableChannel(
+                "所有渠道都不可用".to_string(),
+            ));
         }
 
         // 按评分排序
@@ -258,8 +268,10 @@ impl ProxyState {
             result.ok_or_else(|| ProxyError::ChannelNotFound("渠道不存在或已禁用".to_string()))?;
 
         let api_keys: Vec<String> = serde_json::from_str(&api_keys_str).unwrap_or_default();
-        let endpoints: Vec<EndpointConfig> = serde_json::from_str(&endpoints_str).unwrap_or_default();
-        let model_maps: serde_json::Value = serde_json::from_str(&model_maps_str).unwrap_or_default();
+        let endpoints: Vec<EndpointConfig> =
+            serde_json::from_str(&endpoints_str).unwrap_or_default();
+        let model_maps: serde_json::Value =
+            serde_json::from_str(&model_maps_str).unwrap_or_default();
 
         Ok(ChannelInfo {
             id,
@@ -277,7 +289,7 @@ impl ProxyState {
         endpoint_type: &EndpointType,
     ) -> Result<ChannelInfo, ProxyError> {
         let channels = sqlx::query_as::<_, (String, String, String, String, String)>(
-            "SELECT id, name, api_keys, endpoints, model_maps FROM channels WHERE enabled = 1"
+            "SELECT id, name, api_keys, endpoints, model_maps FROM channels WHERE enabled = 1",
         )
         .fetch_all(&self.pool)
         .await
@@ -285,8 +297,10 @@ impl ProxyState {
 
         for (id, name, api_keys_str, endpoints_str, model_maps_str) in channels {
             let api_keys: Vec<String> = serde_json::from_str(&api_keys_str).unwrap_or_default();
-            let endpoints: Vec<EndpointConfig> = serde_json::from_str(&endpoints_str).unwrap_or_default();
-            let model_maps: serde_json::Value = serde_json::from_str(&model_maps_str).unwrap_or_default();
+            let endpoints: Vec<EndpointConfig> =
+                serde_json::from_str(&endpoints_str).unwrap_or_default();
+            let model_maps: serde_json::Value =
+                serde_json::from_str(&model_maps_str).unwrap_or_default();
 
             // 检查是否支持该端点类型
             let has_endpoint = endpoints.iter().any(|e| e.endpoint_type == *endpoint_type);
@@ -308,11 +322,10 @@ impl ProxyState {
                     if source == model || source == "*" {
                         return Ok(channel);
                     }
-                    if source.contains('*') || source.contains('?') {
-                        if wildcard_match(source, model) {
+                    if (source.contains('*') || source.contains('?'))
+                        && wildcard_match(source, model) {
                             return Ok(channel);
                         }
-                    }
                 }
             }
         }
@@ -360,7 +373,8 @@ impl ProxyState {
 impl ChannelInfo {
     /// 查找指定类型的端点
     pub fn find_endpoint(&self, endpoint_type: &EndpointType) -> Option<EndpointConfig> {
-        self.endpoints.iter()
+        self.endpoints
+            .iter()
             .find(|e| e.endpoint_type == *endpoint_type)
             .cloned()
     }

@@ -2,15 +2,11 @@ use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use sqlx::SqlitePool;
 
 /// 获取可用模型列表
-pub async fn list(
-    State(pool): State<SqlitePool>,
-) -> impl IntoResponse {
+pub async fn list(State(pool): State<SqlitePool>) -> impl IntoResponse {
     // 获取所有启用的分组
-    let groups = sqlx::query_scalar::<_, String>(
-        "SELECT name FROM groups WHERE enabled = 1"
-    )
-    .fetch_all(&pool)
-    .await;
+    let groups = sqlx::query_scalar::<_, String>("SELECT name FROM groups WHERE enabled = 1")
+        .fetch_all(&pool)
+        .await;
 
     match groups {
         Ok(names) => {
@@ -29,12 +25,15 @@ pub async fn list(
             Json(serde_json::json!({
                 "object": "list",
                 "data": models
-            })).into_response()
+            }))
+            .into_response()
         }
-        Err(e) => {
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
                 "error": { "message": e.to_string(), "type": "server_error" }
-            }))).into_response()
-        }
+            })),
+        )
+            .into_response(),
     }
 }
