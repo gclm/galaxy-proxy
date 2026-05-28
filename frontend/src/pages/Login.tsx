@@ -30,7 +30,7 @@ export function Login() {
     <div className="flex min-h-screen items-center justify-center bg-background">
       <div className="w-full max-w-md space-y-8 rounded-lg border p-8 shadow-lg">
         <div className="text-center">
-          <h1 className="text-2xl font-bold">Galaxy Proxy</h1>
+          <h1 className="text-2xl font-bold">Galaxy Router</h1>
           <p className="mt-2 text-muted-foreground">登录管理面板</p>
         </div>
 

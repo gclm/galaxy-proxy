@@ -1,5 +1,6 @@
 pub mod api_keys;
 pub mod auth;
+pub mod backup;
 pub mod channels;
 pub mod fetch_models;
 pub mod groups;

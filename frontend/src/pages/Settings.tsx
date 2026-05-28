@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { authApi, settingsApi } from '@/api'
-import type { SettingItem, InfraConfig } from '@/api/types'
+import { authApi, settingsApi, backupApi } from '@/api'
+import type { SettingItem, InfraConfig, ImportResult } from '@/api/backup'
 import { Button } from '@/components/ui/button'
 import { useAuthStore } from '@/stores/auth'
-import { User, Shield, Settings2, TrendingUp, Activity, Sliders, Server } from 'lucide-react'
+import { User, Shield, Settings2, TrendingUp, Activity, Sliders, Server, Database, Globe } from 'lucide-react'
 
 const tabs = [
   { id: 'account', label: '账户安全', icon: Shield },
@@ -11,6 +11,8 @@ const tabs = [
   { id: 'sticky-session', label: '粘性会话', icon: TrendingUp },
   { id: 'stats', label: '统计日志', icon: Activity },
   { id: 'pricing', label: '成本定价', icon: Settings2 },
+  { id: 'backup', label: '数据备份', icon: Database },
+  { id: 'proxy', label: '上游代理', icon: Globe },
   { id: 'infra', label: '基础配置', icon: Server },
 ] as const
 
@@ -53,6 +55,10 @@ const fieldDefs: Record<string, FieldDef[]> = {
     { key: 'stats.cost.refresh_interval_hours', label: '刷新间隔', type: 'number', min: 1, max: 168, unit: '小时' },
   ],
   pricing: [],
+  proxy: [
+    { key: 'proxy.enabled', label: '启用上游代理', description: '通过代理服务器转发请求到上游 API', type: 'switch' },
+    { key: 'proxy.url', label: '代理地址', description: '如 http://127.0.0.1:7890', type: 'text' },
+  ],
 }
 
 export function Settings() {
@@ -142,6 +148,10 @@ export function Settings() {
           <section className="rounded-2xl border bg-card p-8 text-center">
             <p className="text-sm text-muted-foreground">定价配置暂无可用数据</p>
           </section>
+        )}
+        {activeTab === 'backup' && <BackupTab />}
+        {activeTab === 'proxy' && (
+          <FieldSetTab category="proxy" settingMap={settingMap} onUpdate={handleUpdate} />
         )}
         {activeTab === 'infra' && infra && <InfraTab config={infra} />}
       </div>
@@ -310,6 +320,11 @@ function FieldSetTab({
               options={field.options}
               onSave={(v) => onUpdate(field.key, v)}
             />
+          ) : field.type === 'text' ? (
+            <InlineTextEdit
+              value={settingMap[field.key]?.value ?? ''}
+              onSave={(v) => onUpdate(field.key, v)}
+            />
           ) : (
             <InlineNumberEdit
               value={settingMap[field.key]?.value ?? ''}
@@ -435,6 +450,54 @@ function SelectControl({ value, options, onSave }: { value: string; options: { v
   )
 }
 
+/* ── 内联文本编辑控件 ── */
+
+function InlineTextEdit({ value, onSave }: { value: string; onSave: (v: string) => Promise<void> }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value)
+  const [pending, setPending] = useState(false)
+
+  useEffect(() => { if (!editing) setDraft(value) }, [value, editing])
+
+  const save = async () => {
+    setPending(true)
+    try {
+      await onSave(draft)
+      setEditing(false)
+    } finally {
+      setPending(false)
+    }
+  }
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => { setDraft(value); setEditing(true) }}
+        className="flex items-center gap-1 rounded-lg bg-muted px-3 py-1.5 text-sm font-medium hover:bg-muted/80 transition-colors max-w-[200px] truncate"
+      >
+        {value || '未设置'}
+      </button>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="text"
+        className="input w-60"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false) }}
+        autoFocus
+        disabled={pending}
+      />
+      <Button size="sm" onClick={save} disabled={pending}>保存</Button>
+      <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>取消</Button>
+    </div>
+  )
+}
+
 /* ── 内联数字编辑控件 ── */
 
 function InlineNumberEdit({ value, onSave, min, max, step, unit }: {
@@ -495,6 +558,121 @@ function InlineNumberEdit({ value, onSave, min, max, step, unit }: {
       {unit && <span className="text-xs text-muted-foreground">{unit}</span>}
       <Button size="sm" onClick={save} disabled={pending}>保存</Button>
       <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>取消</Button>
+    </div>
+  )
+}
+
+/* ── 数据备份 ── */
+
+function BackupTab() {
+  const [exporting, setExporting] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [importResult, setImportResult] = useState<ImportResult | null>(null)
+  const [importError, setImportError] = useState('')
+
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      const data = await backupApi.export()
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      const date = new Date().toISOString().slice(0, 10)
+      a.href = url
+      a.download = `galaxy-router-backup-${date}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '导出失败')
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImportResult(null)
+    setImportError('')
+    setImporting(true)
+
+    try {
+      const text = await file.text()
+      const data = JSON.parse(text)
+      const result = await backupApi.import(data)
+      setImportResult(result)
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : '导入失败')
+    } finally {
+      setImporting(false)
+      e.target.value = ''
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-2xl border bg-card p-5 space-y-4">
+        <h2 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+          <Database className="h-4 w-4" />
+          导出数据
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          导出当前系统的渠道、分组、API Key 和设置配置为 JSON 文件。
+        </p>
+        <p className="text-xs text-amber-600">
+          备份文件包含上游 API Key 明文，请妥善保管。
+        </p>
+        <Button onClick={handleExport} disabled={exporting} className="btn-primary">
+          {exporting ? '导出中...' : '导出备份'}
+        </Button>
+      </section>
+
+      <section className="rounded-2xl border bg-card p-5 space-y-4">
+        <h2 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+          <Database className="h-4 w-4" />
+          导入数据
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          从备份文件恢复配置。同名渠道、分组和 API Key 将被跳过，设置项将更新。
+        </p>
+        <div>
+          <label className={`inline-flex cursor-pointer items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+            importing
+              ? 'bg-muted text-muted-foreground cursor-not-allowed'
+              : 'bg-primary text-primary-foreground hover:bg-primary/90'
+          }`}>
+            {importing ? '导入中...' : '选择备份文件'}
+            <input
+              type="file"
+              accept=".json"
+              onChange={handleImport}
+              disabled={importing}
+              className="hidden"
+            />
+          </label>
+        </div>
+        {importError && (
+          <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">{importError}</div>
+        )}
+        {importResult && (
+          <div className="rounded-lg bg-muted p-4 text-sm space-y-2">
+            <p className="font-medium">导入结果</p>
+            <div className="grid grid-cols-2 gap-2 text-muted-foreground">
+              <span>渠道: {importResult.channels_imported}</span>
+              <span>分组: {importResult.groups_imported}</span>
+              <span>API Key: {importResult.api_keys_imported}</span>
+              <span>设置: {importResult.settings_imported}</span>
+            </div>
+            {importResult.errors.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {importResult.errors.map((err, i) => (
+                  <p key={i} className="text-xs text-amber-600">{err}</p>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
     </div>
   )
 }

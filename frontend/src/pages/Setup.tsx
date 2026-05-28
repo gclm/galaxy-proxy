@@ -8,7 +8,7 @@ export function Setup() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [siteTitle, setSiteTitle] = useState('Galaxy Proxy')
+  const [siteTitle, setSiteTitle] = useState('Galaxy Router')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const { setup } = useAuthStore()
@@ -67,7 +67,7 @@ export function Setup() {
                 value={siteTitle}
                 onChange={(e) => setSiteTitle(e.target.value)}
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                placeholder="Galaxy Proxy"
+                placeholder="Galaxy Router"
               />
             </div>
 

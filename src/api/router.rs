@@ -12,6 +12,7 @@ use tower_http::trace::TraceLayer;
 
 use crate::api::handlers::admin::api_keys::{self, ApiKeyState};
 use crate::api::handlers::admin::auth::{self, AuthState};
+use crate::api::handlers::admin::backup::{self, BackupState};
 use crate::api::handlers::admin::channels::{self, ChannelState};
 use crate::api::handlers::admin::fetch_models::{self, FetchModelsState};
 use crate::api::handlers::admin::groups::{self, GroupState};
@@ -27,7 +28,7 @@ use crate::static_assets;
 use crate::stats::StatsState;
 
 /// 创建应用路由
-pub fn create_router(pool: SqlitePool, jwt_secret: String, queuing: &QueuingConfig, server_addr: &str, config: AppConfig) -> Router {
+pub async fn create_router(pool: SqlitePool, jwt_secret: String, queuing: &QueuingConfig, _server_addr: &str, config: AppConfig) -> Router {
     let auth_state = AuthState {
         pool: pool.clone(),
         jwt_service: crate::auth::JwtService::new(&jwt_secret, 24),
@@ -60,7 +61,6 @@ pub fn create_router(pool: SqlitePool, jwt_secret: String, queuing: &QueuingConf
             .build()
             .expect("Failed to create HTTP client"),
         pool: pool.clone(),
-        server_addr: server_addr.to_string(),
     };
 
     let system_info_state = SystemInfoState {
@@ -73,10 +73,12 @@ pub fn create_router(pool: SqlitePool, jwt_secret: String, queuing: &QueuingConf
         config: std::sync::Arc::new(config),
     };
 
+    let backup_state = BackupState { pool: pool.clone() };
+
     let proxy_state = if queuing.enabled {
-        ProxyState::new(pool.clone()).with_queue(queuing.max_queue_size, queuing.queue_timeout_secs)
+        ProxyState::new(pool.clone()).await.with_queue(queuing.max_queue_size, queuing.queue_timeout_secs)
     } else {
-        ProxyState::new(pool.clone())
+        ProxyState::new(pool.clone()).await
     };
 
     Router::new()
@@ -106,6 +108,8 @@ pub fn create_router(pool: SqlitePool, jwt_secret: String, queuing: &QueuingConf
         .nest("/api/v1/admin", system_info_routes(system_info_state))
         // 管理 API 路由 - 设置
         .nest("/api/v1/admin/settings", settings_routes(settings_state))
+        // 管理 API 路由 - 备份
+        .nest("/api/v1/admin/backup", backup_routes(backup_state))
         // 静态文件服务（SPA fallback）
         .fallback(static_assets::serve)
         // 注入 pool 和 JWT secret 到 extensions
@@ -271,4 +275,12 @@ fn settings_routes(settings_state: SettingsState) -> Router {
         .route("/infra", get(settings::infra))
         .route("/{key}", put(settings::update))
         .with_state(settings_state)
+}
+
+/// 备份路由
+fn backup_routes(backup_state: BackupState) -> Router {
+    Router::new()
+        .route("/export", get(backup::export))
+        .route("/import", post(backup::import))
+        .with_state(backup_state)
 }

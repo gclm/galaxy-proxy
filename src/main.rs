@@ -91,7 +91,7 @@ async fn main() -> Result<()> {
         &queuing,
         &addr,
         config,
-    );
+    ).await;
 
     // 启动服务器
     info!("Starting server on {}", addr);

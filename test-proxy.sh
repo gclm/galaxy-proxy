@@ -4,8 +4,9 @@
 set -e
 
 BASE_URL="http://127.0.0.1:8080"
-API_KEY="gp-019e6813-43c7-77d2-89b5-80780a0f37f2"
+API_KEY="${API_KEY:-gp-test-key}"
 MODEL="mimo-v2.5-pro"
+UA_HEADER="User-Agent: HermesAgent/0.14.0"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -109,6 +110,7 @@ HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
   "$BASE_URL/v1/chat/completions" \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
+  -H "$UA_HEADER" \
   -d "{\"model\":\"$MODEL\",\"messages\":[]}")
 if [ "$HTTP" != "200" ]; then
   pass "正确拒绝: HTTP $HTTP"
@@ -122,6 +124,7 @@ HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
   "$BASE_URL/v1/chat/completions" \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
+  -H "$UA_HEADER" \
   -d '{"model":"nonexistent-xyz","messages":[{"role":"user","content":"test"}]}')
 if [ "$HTTP" != "200" ]; then
   pass "正确返回错误: HTTP $HTTP"
@@ -135,6 +138,7 @@ HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
   "$BASE_URL/v1/chat/completions" \
   -H "Authorization: Bearer invalid-key" \
   -H "Content-Type: application/json" \
+  -H "$UA_HEADER" \
   -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"test\"}]}")
 if [ "$HTTP" = "401" ]; then
   pass "正确拒绝: HTTP 401"
@@ -146,7 +150,8 @@ fi
 info "5. Models 列表"
 HTTP=$(curl -s -o /tmp/gp_out.json -w "%{http_code}" \
   "$BASE_URL/v1/models" \
-  -H "Authorization: Bearer $API_KEY")
+  -H "Authorization: Bearer $API_KEY" \
+  -H "$UA_HEADER")
 if [ "$HTTP" = "200" ]; then
   INFO=$(python3 -c "
 import json
@@ -165,6 +170,7 @@ HTTP=$(curl -s -o /tmp/gp_out.json -w "%{http_code}" \
   "$BASE_URL/v1/chat/completions" \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
+  -H "$UA_HEADER" \
   -d "{
     \"model\": \"$MODEL\",
     \"messages\": [{\"role\": \"user\", \"content\": \"你好，请用一句话介绍你自己\"}],
@@ -189,6 +195,7 @@ HTTP=$(curl -s --max-time 30 -o /tmp/gp_stream.txt -w "%{http_code}" \
   "$BASE_URL/v1/chat/completions" \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
+  -H "$UA_HEADER" \
   -d "{
     \"model\": \"$MODEL\",
     \"messages\": [{\"role\": \"user\", \"content\": \"从1数到5\"}],
@@ -212,6 +219,7 @@ HTTP=$(curl -s --max-time 30 -o /tmp/gp_stream.txt -w "%{http_code}" \
   -H "x-api-key: $API_KEY" \
   -H "anthropic-version: 2023-06-01" \
   -H "Content-Type: application/json" \
+  -H "$UA_HEADER" \
   -d "{
     \"model\": \"$MODEL\",
     \"messages\": [{\"role\": \"user\", \"content\": \"从1数到3\"}],
@@ -234,6 +242,7 @@ info "9. OpenAI Responses 流式"
 curl -s --max-time 30 "$BASE_URL/v1/responses" \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
+  -H "$UA_HEADER" \
   -d "{
     \"model\": \"$MODEL\",
     \"input\": \"从1数到3\",

@@ -75,6 +75,13 @@ pub struct EndpointConfig {
     pub base_url: String,
 }
 
+/// 自定义请求头
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CustomHeader {
+    pub key: String,
+    pub value: String,
+}
+
 /// 渠道
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Channel {
@@ -88,6 +95,7 @@ pub struct Channel {
     pub failure_threshold: i32,
     pub blacklist_minutes: i32,
     pub concurrency: i32,
+    pub custom_headers: Vec<CustomHeader>,
     pub enabled: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -105,6 +113,7 @@ pub struct CreateChannelRequest {
     pub failure_threshold: Option<i32>,
     pub blacklist_minutes: Option<i32>,
     pub concurrency: Option<i32>,
+    pub custom_headers: Option<Vec<CustomHeader>>,
     pub enabled: Option<bool>,
 }
 
@@ -120,6 +129,7 @@ pub struct UpdateChannelRequest {
     pub failure_threshold: Option<i32>,
     pub blacklist_minutes: Option<i32>,
     pub concurrency: Option<i32>,
+    pub custom_headers: Option<Vec<CustomHeader>>,
     pub enabled: Option<bool>,
 }
 
@@ -160,7 +170,7 @@ pub async fn list(
 
     // 构建数据查询
     let mut data_builder = sqlx::QueryBuilder::new(
-        "SELECT id, name, api_keys, endpoints, models, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at FROM channels",
+        "SELECT id, name, api_keys, endpoints, models, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, custom_headers, enabled, created_at, updated_at FROM channels",
     );
     push_where(&mut data_builder, &query);
     data_builder.push(format!(" ORDER BY {} {} ", order_field, order_dir));
@@ -231,12 +241,14 @@ pub async fn create(
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
     let models_json = serde_json::to_string(&req.models.unwrap_or_default())
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
+    let custom_headers_json = serde_json::to_string(&req.custom_headers.unwrap_or_default())
+        .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
     // 插入渠道
     sqlx::query(
         r#"
-        INSERT INTO channels (id, name, api_keys, endpoints, models, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO channels (id, name, api_keys, endpoints, models, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, custom_headers, enabled)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#
     )
     .bind(&id)
@@ -249,6 +261,7 @@ pub async fn create(
     .bind(req.failure_threshold.unwrap_or(3))
     .bind(req.blacklist_minutes.unwrap_or(10))
     .bind(req.concurrency.unwrap_or(10))
+    .bind(&custom_headers_json)
     .bind(req.enabled.unwrap_or(true))
     .execute(&state.pool)
     .await
@@ -311,6 +324,10 @@ pub async fn update(
         updates.push("models = ?");
         values.push(serde_json::to_string(models).unwrap_or_default());
     }
+    if let Some(custom_headers) = &req.custom_headers {
+        updates.push("custom_headers = ?");
+        values.push(serde_json::to_string(custom_headers).unwrap_or_default());
+    }
 
     if updates.is_empty() {
         return Err(ApiError::bad_request("没有需要更新的字段"));
@@ -361,8 +378,8 @@ async fn get_channel_by_id(
     pool: &SqlitePool,
     id: &str,
 ) -> Result<Channel, (StatusCode, Json<ApiError>)> {
-    let result = sqlx::query_as::<_, (String, String, String, String, String, Option<i32>, Option<i32>, i32, i32, i32, bool, String, String)>(
-        "SELECT id, name, api_keys, endpoints, models, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at FROM channels WHERE id = ?"
+    let result = sqlx::query_as::<_, (String, String, String, String, String, Option<i32>, Option<i32>, i32, i32, i32, String, bool, String, String)>(
+        "SELECT id, name, api_keys, endpoints, models, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, custom_headers, enabled, created_at, updated_at FROM channels WHERE id = ?"
     )
     .bind(id)
     .fetch_optional(pool)
@@ -374,11 +391,12 @@ async fn get_channel_by_id(
 }
 
 fn row_to_channel(
-    (id, name, api_keys_str, endpoints_str, models_str, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at): (String, String, String, String, String, Option<i32>, Option<i32>, i32, i32, i32, bool, String, String),
+    (id, name, api_keys_str, endpoints_str, models_str, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, custom_headers_str, enabled, created_at, updated_at): (String, String, String, String, String, Option<i32>, Option<i32>, i32, i32, i32, String, bool, String, String),
 ) -> Channel {
     let api_keys: Vec<String> = serde_json::from_str(&api_keys_str).unwrap_or_default();
     let endpoints: Vec<EndpointConfig> = serde_json::from_str(&endpoints_str).unwrap_or_default();
     let models: Vec<String> = serde_json::from_str(&models_str).unwrap_or_default();
+    let custom_headers: Vec<CustomHeader> = serde_json::from_str(&custom_headers_str).unwrap_or_default();
     Channel {
         id,
         name,
@@ -390,6 +408,7 @@ fn row_to_channel(
         failure_threshold,
         blacklist_minutes,
         concurrency,
+        custom_headers,
         enabled,
         created_at,
         updated_at,
@@ -409,6 +428,7 @@ fn row_to_channel_from_row(row: &sqlx::sqlite::SqliteRow) -> Channel {
         failure_threshold: row.get("failure_threshold"),
         blacklist_minutes: row.get("blacklist_minutes"),
         concurrency: row.get("concurrency"),
+        custom_headers: serde_json::from_str(&row.get::<String, _>("custom_headers")).unwrap_or_default(),
         enabled: row.get("enabled"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),

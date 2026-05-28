@@ -65,7 +65,7 @@ export function Dashboard() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">Galaxy Proxy 运行概览</p>
+        <p className="text-sm text-muted-foreground">Galaxy Router 运行概览</p>
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <Zap className="h-3.5 w-3.5 text-green-500" />
           {systemInfo ? '运行中' : '状态未知'}

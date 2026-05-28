@@ -50,10 +50,10 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
     <aside className={`border-r border-sidebar-border bg-sidebar-background flex flex-col transition-all duration-200 ${collapsed ? 'w-16' : 'w-60'}`}>
       <div className={`flex h-16 items-center border-b border-sidebar-border ${collapsed ? 'justify-center px-2' : 'gap-3 px-5'}`}>
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-primary/70 text-primary-foreground text-xs font-bold shadow-sm">
-          GP
+          GR
         </div>
         {!collapsed && (
-          <span className="text-sm font-bold text-sidebar-foreground whitespace-nowrap">Galaxy Proxy</span>
+          <span className="text-sm font-bold text-sidebar-foreground whitespace-nowrap">Galaxy Router</span>
         )}
       </div>
       <nav className="flex-1 space-y-1 p-3">

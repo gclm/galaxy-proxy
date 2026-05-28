@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { useDebouncedValue } from '@/lib/hooks'
 import { formatDate } from '@/lib/utils'
 import { statsApi } from '@/api/stats'
-import type { RequestLog, RequestLogDetail } from '@/api/types'
+import { ENDPOINT_LABELS } from '@/api/types'
+import type { EndpointType, RequestLog, RequestLogDetail } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -191,7 +192,7 @@ export function Logs() {
                 <th className="text-left px-4 py-3 font-medium">模型</th>
                 <th className="text-left px-4 py-3 font-medium">渠道</th>
                 <th className="text-left px-4 py-3 font-medium">Key</th>
-                <th className="text-center px-4 py-3 font-medium">协议</th>
+                <th className="text-center px-4 py-3 font-medium">端点</th>
                 <th className="text-center px-4 py-3 font-medium">类型</th>
                 <th className="text-center px-4 py-3 font-medium">状态</th>
                 <th className="text-right px-4 py-3 font-medium">输入</th>
@@ -229,7 +230,7 @@ export function Logs() {
                     <td className="px-4 py-3 text-muted-foreground text-xs">{log.api_key_name ?? '-'}</td>
                     <td className="px-4 py-3 text-center">
                       <span className="inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
-                        {log.endpoint_type ?? '-'}
+                        {log.endpoint_type ? (ENDPOINT_LABELS[log.endpoint_type as EndpointType] ?? log.endpoint_type) : '-'}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-center">
@@ -345,7 +346,7 @@ export function Logs() {
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-primary">
-                    {detailLog.endpoint_type ?? '-'}
+                    {detailLog.endpoint_type ? (ENDPOINT_LABELS[detailLog.endpoint_type as EndpointType] ?? detailLog.endpoint_type) : '-'}
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5">

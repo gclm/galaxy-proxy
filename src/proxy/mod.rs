@@ -2,7 +2,7 @@ pub mod scheduler;
 pub mod state;
 
 use self::state::LoadBalancerState;
-use crate::api::handlers::admin::channels::{EndpointConfig, EndpointType};
+use crate::api::handlers::admin::channels::{CustomHeader, EndpointConfig, EndpointType};
 use crate::protocol::inbound::Inbound;
 use crate::protocol::outbound::Outbound;
 use crate::stats::cost::CostCalculator;
@@ -156,6 +156,7 @@ pub struct ChannelInfo {
     pub api_keys: Vec<String>,
     pub endpoints: Vec<EndpointConfig>,
     pub models: Vec<String>,
+    pub custom_headers: Vec<CustomHeader>,
 }
 
 /// 分组信息
@@ -190,11 +191,51 @@ pub struct ProxySuccess {
 }
 
 impl ProxyState {
-    pub fn new(pool: SqlitePool) -> Self {
-        let http_client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(300))
+    pub async fn new(pool: SqlitePool) -> Self {
+        let proxy_enabled: bool = sqlx::query_scalar::<_, String>(
+            "SELECT value FROM settings WHERE key = 'proxy.enabled'",
+        )
+        .fetch_optional(&pool)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(false);
+
+        let proxy_url = if proxy_enabled {
+            sqlx::query_scalar::<_, String>(
+                "SELECT value FROM settings WHERE key = 'proxy.url'",
+            )
+            .fetch_optional(&pool)
+            .await
+            .ok()
+            .flatten()
+            .filter(|v| !v.is_empty())
+        } else {
+            None
+        };
+
+        let mut client_builder = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(300));
+
+        if let Some(url) = proxy_url {
+            match reqwest::Proxy::all(&url) {
+                Ok(proxy) => {
+                    tracing::info!("上游代理已启用: {}", url);
+                    client_builder = client_builder.proxy(proxy);
+                }
+                Err(e) => {
+                    tracing::warn!("代理配置无效，忽略代理: {}", e);
+                    client_builder = client_builder.no_proxy();
+                }
+            }
+        } else {
+            client_builder = client_builder.no_proxy();
+        }
+
+        let http_client = client_builder
             .build()
-            .unwrap();
+            .expect("Failed to create HTTP client");
 
         Self {
             stats_recorder: StatsRecorder::new(pool.clone()),
@@ -452,21 +493,22 @@ impl ProxyState {
         }
 
         // 2. 缓存未命中，查询数据库
-        let result = sqlx::query_as::<_, (String, String, String, String, String)>(
-            "SELECT id, name, api_keys, endpoints, models FROM channels WHERE id = ? AND enabled = 1"
+        let result = sqlx::query_as::<_, (String, String, String, String, String, String)>(
+            "SELECT id, name, api_keys, endpoints, models, custom_headers FROM channels WHERE id = ? AND enabled = 1"
         )
         .bind(channel_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| ProxyError::DatabaseError(e.to_string()))?;
 
-        let (id, name, api_keys_str, endpoints_str, models_str) =
+        let (id, name, api_keys_str, endpoints_str, models_str, custom_headers_str) =
             result.ok_or_else(|| ProxyError::ChannelNotFound("渠道不存在或已禁用".to_string()))?;
 
         let api_keys: Vec<String> = serde_json::from_str(&api_keys_str).unwrap_or_default();
         let endpoints: Vec<EndpointConfig> =
             serde_json::from_str(&endpoints_str).unwrap_or_default();
         let models = parse_models(&models_str);
+        let custom_headers: Vec<CustomHeader> = serde_json::from_str(&custom_headers_str).unwrap_or_default();
 
         let channel = ChannelInfo {
             id,
@@ -474,6 +516,7 @@ impl ProxyState {
             api_keys,
             endpoints,
             models,
+            custom_headers,
         };
 
         // 3. 写入缓存
@@ -489,34 +532,41 @@ impl ProxyState {
         exclude_ids: &[String],
         endpoint_filter: impl Fn(&ChannelInfo) -> bool,
     ) -> Result<ChannelInfo, ProxyError> {
-        let channels = sqlx::query_as::<_, (String, String, String, String, String)>(
-            "SELECT id, name, api_keys, endpoints, models FROM channels WHERE enabled = 1",
+        let channels = sqlx::query_as::<_, (String, String, String, String, String, String)>(
+            "SELECT id, name, api_keys, endpoints, models, custom_headers FROM channels WHERE enabled = 1",
         )
         .fetch_all(&self.pool)
         .await
         .map_err(|e| ProxyError::DatabaseError(e.to_string()))?;
 
-        for (id, name, api_keys_str, endpoints_str, models_str) in channels {
+        for (id, name, api_keys_str, endpoints_str, models_str, custom_headers_str) in channels {
             if exclude_ids.contains(&id) {
+                continue;
+            }
+
+            let models = parse_models(&models_str);
+            if !models.iter().any(|m| m == model) {
                 continue;
             }
 
             let api_keys: Vec<String> = serde_json::from_str(&api_keys_str).unwrap_or_default();
             let endpoints: Vec<EndpointConfig> =
                 serde_json::from_str(&endpoints_str).unwrap_or_default();
-            let models = parse_models(&models_str);
 
-            if endpoints.is_empty() || !endpoint_filter(&ChannelInfo {
+            if endpoints.is_empty() {
+                continue;
+            }
+
+            let custom_headers: Vec<CustomHeader> = serde_json::from_str(&custom_headers_str).unwrap_or_default();
+
+            if !endpoint_filter(&ChannelInfo {
                 id: id.clone(),
                 name: name.clone(),
                 api_keys: api_keys.clone(),
                 endpoints: endpoints.clone(),
                 models: models.clone(),
+                custom_headers: custom_headers.clone(),
             }) {
-                continue;
-            }
-
-            if !models.contains(&model.to_string()) {
                 continue;
             }
 
@@ -526,6 +576,7 @@ impl ProxyState {
                 api_keys,
                 endpoints,
                 models,
+                custom_headers,
             });
         }
 
@@ -619,6 +670,13 @@ async fn select_channel_for_proxy(
         .map(|s| s.to_string())
         .or_else(|| body["session_hash"].as_str().map(|s| s.to_string()));
 
+    tracing::debug!(
+        "选择渠道: model={}, endpoint={}, excluded={:?}",
+        model,
+        client_endpoint.as_str(),
+        exclude_ids
+    );
+
     match state
         .select_channel_with_exclude(
             model,
@@ -628,10 +686,32 @@ async fn select_channel_for_proxy(
         )
         .await
     {
-        Ok(sel) => Ok(sel),
-        Err(_) => state
-            .select_channel_for_model_with_exclude(model, session_hash.as_deref(), exclude_ids)
-            .await,
+        Ok(sel) => {
+            tracing::debug!(
+                "选中渠道: channel={} ({}), target_model={}, url={}{}",
+                sel.channel.name,
+                sel.channel.id,
+                sel.target_model,
+                sel.endpoint.base_url,
+                sel.endpoint.endpoint_type.path()
+            );
+            Ok(sel)
+        }
+        Err(e) => {
+            tracing::warn!("精确端点匹配失败: {}, 尝试跨协议匹配", e);
+            let result = state
+                .select_channel_for_model_with_exclude(model, session_hash.as_deref(), exclude_ids)
+                .await;
+            if let Ok(ref sel) = result {
+                tracing::debug!(
+                    "跨协议选中: channel={} ({}), endpoint={}",
+                    sel.channel.name,
+                    sel.channel.id,
+                    sel.endpoint.endpoint_type.as_str()
+                );
+            }
+            result
+        }
     }
 }
 
@@ -691,6 +771,14 @@ async fn prepare_proxy_request(
     }
 
     let url = format!("{}{}", selection.endpoint.base_url, upstream_endpoint.path());
+
+    for header in &selection.channel.custom_headers {
+        if let Ok(name) = reqwest::header::HeaderName::from_bytes(header.key.as_bytes()) {
+            if let Ok(value) = header.value.parse() {
+                reqwest_headers.insert(name, value);
+            }
+        }
+    }
 
     Ok(PreparedProxyRequest {
         body: request_body,
@@ -760,6 +848,12 @@ async fn execute_proxy_request(
     }
 
     if !status.is_success() {
+        tracing::warn!(
+            "Upstream error: channel={}, status={}, body={}",
+            prepared.channel_id,
+            status,
+            &response_body[..response_body.len().min(300)]
+        );
         return Err(ProxyError::UpstreamError { status, body: response_body });
     }
 
@@ -800,13 +894,19 @@ pub async fn proxy_request(
     let mut exclude_ids = Vec::new();
     let mut last_error = None;
 
-    for _ in 0..max_retries {
+    for attempt in 0..max_retries {
         let selection = select_channel_for_proxy(state, headers, body, client_endpoint, &exclude_ids).await?;
         let channel_id = selection.channel.id.clone();
 
         match execute_proxy_request(state, api_key_id, headers, body, client_endpoint, &selection).await {
             Ok(result) => return Ok(result),
             Err(ProxyError::UpstreamError { status, body }) => {
+                tracing::warn!(
+                    "请求失败(第{}次), channel={}, status={}, 排除后重试",
+                    attempt + 1,
+                    channel_id,
+                    status
+                );
                 state
                     .lb_state
                     .record_failure(&channel_id, status.is_server_error())
@@ -818,6 +918,7 @@ pub async fn proxy_request(
         }
     }
 
+    tracing::error!("所有重试耗尽, model={}", body["model"].as_str().unwrap_or("unknown"));
     Err(last_error.unwrap_or_else(|| ProxyError::NoAvailableChannel("所有渠道都不可用".to_string())))
 }
 
@@ -1050,7 +1151,7 @@ pub async fn proxy_stream(
     let mut exclude_ids = Vec::new();
     let mut last_error = None;
 
-    for _ in 0..max_retries {
+    for attempt in 0..max_retries {
         let selection =
             select_channel_for_proxy(state, headers, body, client_endpoint, &exclude_ids).await?;
         let channel_id = selection.channel.id.clone();
@@ -1062,6 +1163,12 @@ pub async fn proxy_stream(
                 return Ok(result);
             }
             Err(ProxyError::UpstreamError { status, body }) => {
+                tracing::warn!(
+                    "流式请求失败(第{}次), channel={}, status={}, 排除后重试",
+                    attempt + 1,
+                    channel_id,
+                    status
+                );
                 state
                     .lb_state
                     .record_failure(&channel_id, status.is_server_error())
@@ -1073,6 +1180,7 @@ pub async fn proxy_stream(
         }
     }
 
+    tracing::error!("流式重试耗尽, model={}", body["model"].as_str().unwrap_or("unknown"));
     Err(last_error.unwrap_or_else(|| {
         ProxyError::NoAvailableChannel("所有渠道都不可用".to_string())
     }))

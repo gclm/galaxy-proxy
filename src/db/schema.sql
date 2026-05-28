@@ -1,0 +1,151 @@
+-- Galaxy Router 数据库 Schema
+-- 版本: 0 (初始版本)
+
+-- 管理员用户
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 上游渠道
+CREATE TABLE IF NOT EXISTS channels (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    api_keys TEXT NOT NULL DEFAULT '[]',
+    endpoints TEXT NOT NULL DEFAULT '[]',
+    models TEXT NOT NULL DEFAULT '[]',
+    rate_limit_rpm INTEGER,
+    rate_limit_tpm INTEGER,
+    failure_threshold INTEGER NOT NULL DEFAULT 3,
+    blacklist_minutes INTEGER NOT NULL DEFAULT 10,
+    concurrency INTEGER NOT NULL DEFAULT 10,
+    custom_headers TEXT NOT NULL DEFAULT '[]',
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- API Key
+CREATE TABLE IF NOT EXISTS api_keys (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    api_key TEXT NOT NULL UNIQUE,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 模型分组
+CREATE TABLE IF NOT EXISTS groups (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    match_regex TEXT,
+    retry_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    max_retries INTEGER NOT NULL DEFAULT 3,
+    first_token_timeout_secs INTEGER NOT NULL DEFAULT 30,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 分组子项
+CREATE TABLE IF NOT EXISTS group_items (
+    id TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    model_name TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 1,
+    weight INTEGER NOT NULL DEFAULT 100,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(group_id, channel_id, model_name)
+);
+
+-- 模型定价
+CREATE TABLE IF NOT EXISTS model_pricing (
+    id TEXT PRIMARY KEY,
+    model TEXT NOT NULL UNIQUE,
+    input_per_million REAL NOT NULL,
+    output_per_million REAL NOT NULL,
+    cache_read_per_million REAL,
+    cache_creation_per_million REAL,
+    source TEXT NOT NULL DEFAULT 'manual',
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 使用日志
+CREATE TABLE IF NOT EXISTS usage_logs (
+    id TEXT PRIMARY KEY,
+    api_key_id TEXT,
+    channel_id TEXT,
+    group_id TEXT,
+    requested_model TEXT NOT NULL,
+    actual_model TEXT,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+    cost REAL,
+    latency_ms INTEGER,
+    status_code INTEGER,
+    error_message TEXT,
+    endpoint_type TEXT,
+    request_type TEXT NOT NULL DEFAULT 'passthrough',
+    request_content TEXT,
+    response_content TEXT,
+    is_stream BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 每日统计
+CREATE TABLE IF NOT EXISTS usage_daily (
+    id TEXT PRIMARY KEY,
+    date TEXT NOT NULL,
+    api_key_id TEXT,
+    channel_id TEXT,
+    group_id TEXT,
+    model TEXT NOT NULL,
+    request_count INTEGER NOT NULL DEFAULT 0,
+    success_count INTEGER NOT NULL DEFAULT 0,
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+    total_cost REAL NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(date, api_key_id, channel_id, group_id, model)
+);
+
+-- 系统设置
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    category TEXT NOT NULL DEFAULT 'general',
+    value TEXT NOT NULL,
+    description TEXT,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 迁移记录
+CREATE TABLE IF NOT EXISTS _migrations (
+    version INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 索引
+CREATE INDEX IF NOT EXISTS idx_usage_logs_created_at ON usage_logs(created_at);
+
+-- 默认设置
+INSERT OR IGNORE INTO settings (key, category, value, description) VALUES
+    ('scheduler.top_k', 'scheduler', '7', 'Top-K 候选数量'),
+    ('scheduler.score_weights', 'scheduler', '{"priority":1.0,"load":1.0,"queue":0.7,"error_rate":0.8,"ttft":0.5}', '评分权重'),
+    ('sticky_session.enabled', 'sticky_session', 'true', '是否启用粘性会话'),
+    ('sticky_session.ttl_seconds', 'sticky_session', '3600', '会话保持时间（秒）'),
+    ('stats.log_detail_mode', 'stats', 'failures_only', '日志模式：all/failures_only/none'),
+    ('stats.cost.source', 'stats', 'models.dev', '成本数据源'),
+    ('stats.cost.refresh_interval_hours', 'stats', '24', '成本数据刷新间隔（小时）'),
+    ('proxy.enabled', 'proxy', 'false', '是否启用上游代理'),
+    ('proxy.url', 'proxy', '', '代理地址（如 http://127.0.0.1:7890）');

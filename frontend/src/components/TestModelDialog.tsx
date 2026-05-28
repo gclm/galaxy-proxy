@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import type { Channel, TestModelResponse } from '@/api/types'
+import type { Channel, EndpointType, TestModelResponse } from '@/api/types'
 import { channelsApi } from '@/api/channels'
 import { Button } from '@/components/ui/button'
 import {
@@ -23,7 +23,7 @@ interface LogLine {
   type: 'info' | 'success' | 'error' | 'pending' | 'prompt' | 'output' | 'muted'
 }
 
-const TEST_PROTOCOLS = [
+const TEST_PROTOCOLS: { value: EndpointType; label: string }[] = [
   { value: 'openai_chat', label: 'OpenAI Chat' },
   { value: 'openai_response', label: 'OpenAI Responses' },
   { value: 'anthropic', label: 'Anthropic' },
@@ -31,8 +31,15 @@ const TEST_PROTOCOLS = [
   { value: 'openai_images', label: 'Images' },
 ]
 
+const USER_AGENTS = [
+  { value: '', label: '默认（不设置）' },
+  { value: 'HermesAgent/0.14.0', label: 'HermesAgent/0.14.0' },
+  { value: 'claude-cli/2.1.140 (external, cli)', label: 'claude-code' },
+]
+
 export function TestModelDialog({ channel, open, onOpenChange }: TestModelDialogProps) {
-  const [testProtocol, setTestProtocol] = useState('openai_chat')
+  const [testProtocol, setTestProtocol] = useState('')
+  const [userAgent, setUserAgent] = useState('')
   const [selectedModel, setSelectedModel] = useState('')
   const [status, setStatus] = useState<Status>('idle')
   const [logs, setLogs] = useState<LogLine[]>([])
@@ -42,6 +49,9 @@ export function TestModelDialog({ channel, open, onOpenChange }: TestModelDialog
   if (!channel) return null
 
   const models = channel.models || []
+  const endpointTypes = new Set(channel.endpoints.map(e => e.type))
+  const availableProtocols = TEST_PROTOCOLS.filter(p => endpointTypes.has(p.value))
+  const currentProtocol = testProtocol || availableProtocols[0]?.value || ''
   const currentModel = selectedModel || models[0] || ''
 
   const scrollToBottom = () => {
@@ -57,23 +67,23 @@ export function TestModelDialog({ channel, open, onOpenChange }: TestModelDialog
     scrollToBottom()
   }
 
-  const protocolLabel = TEST_PROTOCOLS.find(p => p.value === testProtocol)?.label || testProtocol
+  const protocolLabel = availableProtocols.find(p => p.value === currentProtocol)?.label || currentProtocol
 
   const runTest = async () => {
-    if (!currentModel) return
+    if (!currentModel || !currentProtocol) return
 
     setStatus('testing')
     setResult(null)
     setLogs([])
 
     addLogs([
-      { text: `▸ 通过代理测试 ${protocolLabel} 协议...`, type: 'pending' },
+      { text: `▸ 测试 ${protocolLabel} 协议...`, type: 'pending' },
     ])
 
     await new Promise(r => setTimeout(r, 200))
 
     addLogs([
-      { text: '✓ 代理连接成功', type: 'success' },
+      { text: '✓ 渠道连接成功', type: 'success' },
       { text: `→ 协议: ${protocolLabel}`, type: 'info' },
       { text: `→ 模型: ${currentModel}`, type: 'info' },
       { text: '', type: 'muted' },
@@ -83,8 +93,10 @@ export function TestModelDialog({ channel, open, onOpenChange }: TestModelDialog
 
     try {
       const res = await channelsApi.testModel({
+        channel_id: channel.id,
         model: currentModel,
-        test_protocol: testProtocol,
+        test_protocol: currentProtocol,
+        user_agent: userAgent || undefined,
       })
       setResult(res)
 
@@ -150,16 +162,16 @@ export function TestModelDialog({ channel, open, onOpenChange }: TestModelDialog
           <div>
             <label className="block text-sm font-medium mb-1.5">测试协议</label>
             <select
-              value={testProtocol}
+              value={currentProtocol}
               onChange={(e) => { setTestProtocol(e.target.value); reset() }}
               className="input"
             >
-              {TEST_PROTOCOLS.map((p) => (
+              {availableProtocols.map((p) => (
                 <option key={p.value} value={p.value}>{p.label}</option>
               ))}
             </select>
             <p className="text-xs text-muted-foreground mt-1">
-              通过代理管线发送请求，测试协议转换效果
+              直接向渠道上游发送请求，测试模型连通性
             </p>
           </div>
 
@@ -174,6 +186,20 @@ export function TestModelDialog({ channel, open, onOpenChange }: TestModelDialog
               <option value="">选择模型</option>
               {models.map((model) => (
                 <option key={model} value={model}>{model}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* User-Agent 选择 */}
+          <div>
+            <label className="block text-sm font-medium mb-1.5">User-Agent</label>
+            <select
+              value={userAgent}
+              onChange={(e) => setUserAgent(e.target.value)}
+              className="input"
+            >
+              {USER_AGENTS.map((ua) => (
+                <option key={ua.value} value={ua.value}>{ua.label}</option>
               ))}
             </select>
           </div>
@@ -206,7 +232,7 @@ export function TestModelDialog({ channel, open, onOpenChange }: TestModelDialog
 
           {/* 底部信息 */}
           <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
-            <span>请求经代理转换后发送到上游</span>
+            <span>请求直接发送到渠道上游</span>
             {result && <span>耗时: {result.latency_ms}ms</span>}
           </div>
 
@@ -216,13 +242,13 @@ export function TestModelDialog({ channel, open, onOpenChange }: TestModelDialog
               关闭
             </Button>
             {result ? (
-              <Button onClick={runTest} disabled={status === 'testing' || !currentModel}
+              <Button onClick={runTest} disabled={status === 'testing' || !currentModel || !currentProtocol}
                 className={status === 'success' ? 'bg-green-600 hover:bg-green-700 text-white' : status === 'error' ? 'bg-orange-500 hover:bg-orange-600 text-white' : 'btn-primary'}>
                 <RotateCw className="mr-2 h-4 w-4" />
                 重新测试
               </Button>
             ) : (
-              <Button onClick={runTest} disabled={status === 'testing' || !currentModel} className="btn-primary">
+              <Button onClick={runTest} disabled={status === 'testing' || !currentModel || !currentProtocol} className="btn-primary">
                 <Play className="mr-2 h-4 w-4" />
                 {status === 'testing' ? '测试中...' : '开始测试'}
               </Button>

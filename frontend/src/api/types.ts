@@ -48,6 +48,11 @@ export interface EndpointConfig {
   base_url: string
 }
 
+export interface CustomHeader {
+  key: string
+  value: string
+}
+
 export interface Channel {
   id: string
   name: string
@@ -59,6 +64,7 @@ export interface Channel {
   failure_threshold: number
   blacklist_minutes: number
   concurrency: number
+  custom_headers: CustomHeader[]
   enabled: boolean
   created_at: string
   updated_at: string
@@ -74,6 +80,7 @@ export interface CreateChannelRequest {
   failure_threshold?: number
   blacklist_minutes?: number
   concurrency?: number
+  custom_headers?: CustomHeader[]
   enabled?: boolean
 }
 
@@ -87,6 +94,7 @@ export interface UpdateChannelRequest {
   failure_threshold?: number
   blacklist_minutes?: number
   concurrency?: number
+  custom_headers?: CustomHeader[]
   enabled?: boolean
 }
 
@@ -96,8 +104,10 @@ export interface FetchModelsRequest {
 }
 
 export interface TestModelRequest {
+  channel_id: string
   model: string
   test_protocol: string
+  user_agent?: string
 }
 
 export interface TestModelResponse {

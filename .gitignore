@@ -32,3 +32,4 @@ static_dist/
 test_data/
 tmp/
 /.claude/
+/.vite/

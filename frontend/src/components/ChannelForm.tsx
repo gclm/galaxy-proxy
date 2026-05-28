@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Channel, CreateChannelRequest, EndpointConfig, EndpointType } from '@/api/types'
+import type { Channel, CreateChannelRequest, CustomHeader, EndpointConfig, EndpointType } from '@/api/types'
 import { ENDPOINT_LABELS } from '@/api/types'
 import { channelsApi } from '@/api/channels'
 import { Button } from '@/components/ui/button'
@@ -32,6 +32,7 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
   const [failureThreshold, setFailureThreshold] = useState(channel?.failure_threshold?.toString() ?? '3')
   const [blacklistMinutes, setBlacklistMinutes] = useState(channel?.blacklist_minutes?.toString() ?? '5')
   const [concurrency, setConcurrency] = useState(channel?.concurrency?.toString() ?? '10')
+  const [customHeaders, setCustomHeaders] = useState<CustomHeader[]>(channel?.custom_headers ?? [])
   const [enabled, setEnabled] = useState(channel?.enabled ?? true)
   const [submitting, setSubmitting] = useState(false)
   const [fetchingModels, setFetchingModels] = useState(false)
@@ -88,6 +89,7 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
         failure_threshold: parseInt(failureThreshold) || 3,
         blacklist_minutes: parseInt(blacklistMinutes) || 5,
         concurrency: parseInt(concurrency) || 10,
+        custom_headers: customHeaders.filter((h) => h.key.trim()),
       }
 
       if (rateLimitRpm) data.rate_limit_rpm = parseInt(rateLimitRpm)
@@ -273,6 +275,45 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
             <input type="number" value={concurrency} onChange={(e) => setConcurrency(e.target.value)} className="input" />
           </div>
         </div>
+      </section>
+
+      {/* 自定义请求头 */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium text-muted-foreground">自定义请求头</h3>
+          <Button type="button" variant="outline" size="sm" onClick={() => setCustomHeaders([...customHeaders, { key: '', value: '' }])}>
+            <Plus className="h-4 w-4 mr-1" /> 添加
+          </Button>
+        </div>
+        {customHeaders.map((h, i) => (
+          <div key={i} className="flex gap-2">
+            <input
+              type="text"
+              value={h.key}
+              onChange={(e) => {
+                const updated = [...customHeaders]
+                updated[i] = { ...updated[i], key: e.target.value }
+                setCustomHeaders(updated)
+              }}
+              className="input w-40"
+              placeholder="Header 名称"
+            />
+            <input
+              type="text"
+              value={h.value}
+              onChange={(e) => {
+                const updated = [...customHeaders]
+                updated[i] = { ...updated[i], value: e.target.value }
+                setCustomHeaders(updated)
+              }}
+              className="input flex-1"
+              placeholder="Header 值"
+            />
+            <Button type="button" variant="ghost" size="icon" onClick={() => setCustomHeaders(customHeaders.filter((_, j) => j !== i))}>
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+        ))}
       </section>
 
       {/* 操作按钮 */}
