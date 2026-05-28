@@ -59,7 +59,19 @@ class ApiClient {
     return data.data as T
   }
 
-  async get<T>(path: string): Promise<T> {
+  async get<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
+    if (params) {
+      const searchParams = new URLSearchParams()
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== '') {
+          searchParams.set(key, String(value))
+        }
+      })
+      const qs = searchParams.toString()
+      if (qs) {
+        return this.request<T>(`${path}?${qs}`)
+      }
+    }
     return this.request<T>(path)
   }
 

@@ -5,6 +5,7 @@ import {
   Layers,
   Key,
   BarChart3,
+  ScrollText,
   Settings,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -35,20 +36,27 @@ const navItems = [
     href: '/stats',
     icon: BarChart3,
   },
+  {
+    title: '请求日志',
+    href: '/logs',
+    icon: ScrollText,
+  },
 ]
 
-export function Sidebar() {
+export function Sidebar({ collapsed }: { collapsed: boolean }) {
   const location = useLocation()
 
   return (
-    <aside className="w-64 border-r bg-sidebar">
-      <div className="flex h-16 items-center border-b px-6">
-        <Link to="/" className="flex items-center gap-2 font-semibold">
-          <Settings className="h-6 w-6" />
-          <span>Galaxy Proxy</span>
-        </Link>
+    <aside className={`border-r border-sidebar-border bg-sidebar-background flex flex-col transition-all duration-200 ${collapsed ? 'w-16' : 'w-60'}`}>
+      <div className={`flex h-16 items-center border-b border-sidebar-border ${collapsed ? 'justify-center px-2' : 'gap-3 px-5'}`}>
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-primary/70 text-primary-foreground text-xs font-bold shadow-sm">
+          GP
+        </div>
+        {!collapsed && (
+          <span className="text-sm font-bold text-sidebar-foreground whitespace-nowrap">Galaxy Proxy</span>
+        )}
       </div>
-      <nav className="space-y-1 p-4">
+      <nav className="flex-1 space-y-1 p-3">
         {navItems.map((item) => {
           const isActive =
             item.href === '/'
@@ -59,19 +67,43 @@ export function Sidebar() {
             <Link
               key={item.href}
               to={item.href}
+              title={collapsed ? item.title : undefined}
               className={cn(
-                'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
+                'group flex items-center gap-3 rounded-xl text-sm font-medium transition-all duration-200',
+                collapsed ? 'justify-center px-2 py-2.5' : 'px-3 py-2.5',
                 isActive
-                  ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                  : 'text-sidebar-foreground hover:bg-sidebar-accent/50'
+                  ? 'bg-sidebar-accent text-sidebar-primary'
+                  : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
               )}
             >
-              <item.icon className="h-4 w-4" />
-              <span>{item.title}</span>
+              <item.icon className={cn('h-4 w-4 shrink-0', isActive && 'text-sidebar-primary')} />
+              {!collapsed && <span className="flex-1">{item.title}</span>}
+              {isActive && !collapsed && (
+                <span className="h-1.5 w-1.5 rounded-full bg-sidebar-primary shadow-sm shadow-sidebar-primary/50" />
+              )}
             </Link>
           )
         })}
       </nav>
+      <div className="border-t border-sidebar-border p-3">
+        <Link
+          to="/settings"
+          title={collapsed ? '设置' : undefined}
+          className={cn(
+            'flex items-center gap-3 rounded-xl text-sm font-medium transition-all duration-200',
+            collapsed ? 'justify-center px-2 py-2.5' : 'px-3 py-2.5',
+            location.pathname === '/settings'
+              ? 'bg-sidebar-accent text-sidebar-primary'
+              : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
+          )}
+        >
+          <Settings className={cn('h-4 w-4 shrink-0', location.pathname === '/settings' && 'text-sidebar-primary')} />
+          {!collapsed && <span>设置</span>}
+          {location.pathname === '/settings' && !collapsed && (
+            <span className="ml-auto h-1.5 w-1.5 rounded-full bg-sidebar-primary shadow-sm shadow-sidebar-primary/50" />
+          )}
+        </Link>
+      </div>
     </aside>
   )
 }

@@ -175,12 +175,12 @@ impl Inbound for OpenAiResponsesInbound {
     }
 
     fn transform_stream_event(&self, event: &LlmStreamResponse) -> Result<Vec<u8>, InboundError> {
-        // 转换为 Responses 流式格式
         let mut events = vec![];
 
         if let Some(choice) = event.first_choice() {
             if let Some(content) = &choice.delta.content
-                && let Content::Text(text) = content {
+                && let Content::Text(text) = content
+                && !text.is_empty() {
                     events.push(format!(
                         "event: response.output_text.delta\ndata: {}\n\n",
                         serde_json::json!({

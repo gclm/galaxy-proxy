@@ -258,7 +258,7 @@ fn get_migrations() -> Vec<Migration> {
                 name TEXT NOT NULL UNIQUE,
                 api_keys TEXT NOT NULL DEFAULT '[]',
                 endpoints TEXT NOT NULL DEFAULT '[]',
-                model_maps TEXT NOT NULL DEFAULT '{}',
+                model_maps TEXT NOT NULL DEFAULT '[]',
                 rate_limit_rpm INTEGER,
                 rate_limit_tpm INTEGER,
                 failure_threshold INTEGER NOT NULL DEFAULT 3,
@@ -407,6 +407,43 @@ fn get_migrations() -> Vec<Migration> {
             name: "rename_model_maps_to_models",
             sql: r#"
             ALTER TABLE channels RENAME COLUMN model_maps TO models;
+            "#,
+        },
+        Migration {
+            version: 11,
+            name: "migrate_models_to_array",
+            sql: r#"
+            UPDATE channels SET models = '[]' WHERE models IS NULL OR models = '' OR models = '{}';
+            "#,
+        },
+        Migration {
+            version: 12,
+            name: "add_endpoint_type_to_usage_logs",
+            sql: r#"
+            ALTER TABLE usage_logs ADD COLUMN endpoint_type TEXT;
+            ALTER TABLE usage_logs ADD COLUMN request_type TEXT NOT NULL DEFAULT 'passthrough';
+            "#,
+        },
+        Migration {
+            version: 13,
+            name: "add_content_to_usage_logs",
+            sql: r#"
+            ALTER TABLE usage_logs ADD COLUMN request_content TEXT;
+            ALTER TABLE usage_logs ADD COLUMN response_content TEXT;
+            "#,
+        },
+        Migration {
+            version: 14,
+            name: "add_usage_logs_index",
+            sql: r#"
+            CREATE INDEX IF NOT EXISTS idx_usage_logs_created_at ON usage_logs(created_at);
+            "#,
+        },
+        Migration {
+            version: 15,
+            name: "add_is_stream_to_usage_logs",
+            sql: r#"
+            ALTER TABLE usage_logs ADD COLUMN is_stream BOOLEAN NOT NULL DEFAULT FALSE;
             "#,
         },
     ]

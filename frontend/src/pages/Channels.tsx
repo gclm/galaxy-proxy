@@ -1,50 +1,88 @@
-import { useEffect, useState } from 'react'
-import { channelsApi } from '@/api'
-import type { Channel, CreateChannelRequest, EndpointConfig, TestModelResponse } from '@/api/types'
+import { useCallback, useEffect, useState } from 'react'
+import { channelsApi, type ChannelListParams } from '@/api/channels'
+import type { Channel, CreateChannelRequest, EndpointType } from '@/api/types'
+import { ENDPOINT_LABELS } from '@/api/types'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ChannelForm } from '@/components/ChannelForm'
-import { Plus, Pencil, Trash2, Play, X, ChevronDown, ChevronUp } from 'lucide-react'
-
-const ENDPOINT_LABELS: Record<string, string> = {
-  openai_chat: 'OpenAI Chat',
-  openai_response: 'OpenAI Responses',
-  anthropic: 'Anthropic',
-  gemini: 'Gemini',
-  openai_embedding: 'OpenAI Embedding',
-  openai_images: 'OpenAI Images',
-}
+import { TestModelDialog } from '@/components/TestModelDialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { formatDate } from '@/lib/utils'
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  Play,
+  Search,
+  RefreshCw,
+  ChevronLeft,
+  ChevronRight,
+  ArrowUpDown,
+} from 'lucide-react'
 
 export function Channels() {
   const [channels, setChannels] = useState<Channel[]>([])
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
+
+  // 筛选状态
+  const [search, setSearch] = useState('')
+  const [status, setStatus] = useState<string>('')
+  const [sortBy, setSortBy] = useState('created_at')
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
+  const [page, setPage] = useState(1)
+  const pageSize = 20
+
+  // Dialog 状态
+  const [formOpen, setFormOpen] = useState(false)
   const [editingChannel, setEditingChannel] = useState<Channel | null>(null)
-  const [showForm, setShowForm] = useState(false)
-  const [testingChannelId, setTestingChannelId] = useState<string | null>(null)
-  const [testEndpoint, setTestEndpoint] = useState<EndpointConfig | null>(null)
-  const [testModel, setTestModel] = useState('')
-  const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState<TestModelResponse | null>(null)
-  const [expandedChannelId, setExpandedChannelId] = useState<string | null>(null)
+  const [testChannel, setTestChannel] = useState<Channel | null>(null)
 
-  useEffect(() => {
-    fetchChannels()
-  }, [])
+  // 删除确认
+  const [deleteId, setDeleteId] = useState<string | null>(null)
 
-  const fetchChannels = async () => {
+  const fetchChannels = useCallback(async () => {
+    setLoading(true)
     try {
-      const data = await channelsApi.list()
-      setChannels(data)
+      const params: ChannelListParams = {
+        search: search || undefined,
+        status: status || undefined,
+        sort_by: sortBy,
+        sort_order: sortOrder,
+        page,
+        page_size: pageSize,
+      }
+      const data = await channelsApi.list(params)
+      setChannels(data.items)
+      setTotal(data.total)
     } catch (error) {
       console.error('Failed to fetch channels:', error)
     } finally {
       setLoading(false)
     }
-  }
+  }, [search, status, sortBy, sortOrder, page])
+
+  useEffect(() => {
+    fetchChannels()
+  }, [fetchChannels])
+
+  // 搜索 debounce
+  const [searchInput, setSearchInput] = useState('')
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearch(searchInput)
+      setPage(1)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchInput])
 
   const handleCreate = async (data: CreateChannelRequest) => {
     await channelsApi.create(data)
-    setShowForm(false)
+    setFormOpen(false)
     fetchChannels()
   }
 
@@ -52,257 +90,235 @@ export function Channels() {
     if (!editingChannel) return
     await channelsApi.update(editingChannel.id, data)
     setEditingChannel(null)
+    setFormOpen(false)
     fetchChannels()
   }
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('确定删除此渠道？')) return
-    try {
-      await channelsApi.delete(id)
-      setChannels(channels.filter((c) => c.id !== id))
-    } catch (error) {
-      console.error('Failed to delete channel:', error)
+  const handleToggleEnabled = async (channel: Channel) => {
+    await channelsApi.update(channel.id, { enabled: !channel.enabled })
+    fetchChannels()
+  }
+
+  const handleDelete = async () => {
+    if (!deleteId) return
+    await channelsApi.delete(deleteId)
+    setDeleteId(null)
+    fetchChannels()
+  }
+
+  const handleSort = (field: string) => {
+    if (sortBy === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortBy(field)
+      setSortOrder('desc')
     }
+    setPage(1)
   }
 
-  const openTestPanel = (channel: Channel) => {
-    setTestingChannelId(channel.id)
-    setTestEndpoint(channel.endpoints[0] || null)
-    setTestModel(channel.models?.available_models?.[0] || '')
-    setTestResult(null)
+  const openEdit = (channel: Channel) => {
+    setEditingChannel(channel)
+    setFormOpen(true)
   }
 
-  const closeTestPanel = () => {
-    setTestingChannelId(null)
-    setTestEndpoint(null)
-    setTestModel('')
-    setTestResult(null)
+  const openCreate = () => {
+    setEditingChannel(null)
+    setFormOpen(true)
   }
 
-  const handleTestModel = async () => {
-    if (!testEndpoint || !testModel || !testingChannelId) return
-
-    const channel = channels.find(c => c.id === testingChannelId)
-    if (!channel) return
-
-    setTesting(true)
-    setTestResult(null)
-    try {
-      const result = await channelsApi.testModel({
-        endpoint: testEndpoint,
-        api_key: channel.api_keys[0],
-        model: testModel,
-      })
-      setTestResult(result)
-    } catch (error: any) {
-      setTestResult({
-        success: false,
-        message: error.response?.data?.message || error.message,
-        latency_ms: 0,
-      })
-    } finally {
-      setTesting(false)
-    }
+  const closeForm = () => {
+    setFormOpen(false)
+    setEditingChannel(null)
   }
 
-  if (loading) {
-    return <div className="flex items-center justify-center h-full">加载中...</div>
-  }
-
-  if (showForm || editingChannel) {
-    return (
-      <div className="space-y-6">
-        <h1 className="text-2xl font-bold">
-          {editingChannel ? '编辑渠道' : '创建渠道'}
-        </h1>
-        <ChannelForm
-          channel={editingChannel ?? undefined}
-          onSubmit={editingChannel ? handleUpdate : handleCreate}
-          onCancel={() => {
-            setShowForm(false)
-            setEditingChannel(null)
-          }}
-        />
-      </div>
-    )
-  }
+  const totalPages = Math.ceil(total / pageSize)
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">渠道管理</h1>
-        <Button onClick={() => setShowForm(true)} className="btn-primary">
+        <p className="text-sm text-muted-foreground">管理上游服务渠道与 API Key</p>
+        <Button onClick={openCreate} className="btn-primary">
           <Plus className="mr-2 h-4 w-4" />
           添加渠道
         </Button>
       </div>
 
-      <div className="grid gap-4">
-        {channels.map((channel) => (
-          <Card key={channel.id} className="card-hover">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-              <div className="flex items-center gap-3">
-                <CardTitle className="text-lg">{channel.name}</CardTitle>
-                <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                  channel.enabled
-                    ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
-                    : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400'
-                }`}>
-                  {channel.enabled ? '启用' : '禁用'}
-                </span>
-              </div>
-              <div className="flex items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => openTestPanel(channel)}
-                  className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20"
-                >
-                  <Play className="h-4 w-4 mr-1" />
-                  测试
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setEditingChannel(channel)}
-                >
-                  <Pencil className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => handleDelete(channel.id)}
-                  className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-2 text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">端点:</span>
-                  <div className="flex flex-wrap gap-1">
-                    {channel.endpoints.map((ep, i) => (
-                      <span key={i} className="inline-flex items-center rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">
-                        {ENDPOINT_LABELS[ep.type] || ep.type}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">API Keys:</span>
-                  <span className="font-medium">{channel.api_keys.length} 个</span>
-                </div>
-                {channel.models?.available_models && channel.models.available_models.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-muted-foreground">模型:</span>
-                    <span className="font-medium">{channel.models.available_models.length} 个</span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 text-xs"
-                      onClick={() => setExpandedChannelId(expandedChannelId === channel.id ? null : channel.id)}
-                    >
-                      {expandedChannelId === channel.id ? (
-                        <ChevronUp className="h-3 w-3" />
-                      ) : (
-                        <ChevronDown className="h-3 w-3" />
-                      )}
-                    </Button>
-                  </div>
-                )}
-                {expandedChannelId === channel.id && channel.models?.available_models && (
-                  <div className="flex flex-wrap gap-1 mt-1 ml-16">
-                    {channel.models.available_models.map((model) => (
-                      <span key={model} className="inline-flex items-center rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
-                        {model}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </CardContent>
+      {/* 筛选栏 */}
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <input
+            type="text"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="搜索渠道名称..."
+            className="input pl-9"
+          />
+        </div>
+        <select
+          value={status}
+          onChange={(e) => { setStatus(e.target.value); setPage(1) }}
+          className="input w-28"
+        >
+          <option value="">全部状态</option>
+          <option value="enabled">启用</option>
+          <option value="disabled">禁用</option>
+        </select>
+        <Button variant="outline" size="icon" onClick={fetchChannels} title="刷新">
+          <RefreshCw className="h-4 w-4" />
+        </Button>
+      </div>
 
-            {/* 测试面板 */}
-            {testingChannelId === channel.id && (
-              <div className="border-t border-gray-100 dark:border-gray-800 p-4 bg-gray-50 dark:bg-gray-900/50">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-sm font-medium">模型测试</h4>
-                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={closeTestPanel}>
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">端点</label>
-                    <select
-                      className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
-                      value={channel.endpoints.indexOf(testEndpoint!)}
-                      onChange={(e) => setTestEndpoint(channel.endpoints[parseInt(e.target.value)])}
-                    >
-                      {channel.endpoints.map((ep, i) => (
-                        <option key={i} value={i}>{ENDPOINT_LABELS[ep.type] || ep.type}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">模型</label>
-                    <select
-                      className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
-                      value={testModel}
-                      onChange={(e) => setTestModel(e.target.value)}
-                    >
-                      <option value="">选择模型</option>
-                      {channel.models?.available_models?.map((model) => (
-                        <option key={model} value={model}>{model}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="flex items-end">
-                    <Button
-                      onClick={handleTestModel}
-                      disabled={testing || !testModel}
-                      className="w-full"
-                    >
-                      {testing ? '测试中...' : '开始测试'}
-                    </Button>
-                  </div>
-                </div>
-                {testResult && (
-                  <div className={`mt-3 rounded-lg p-3 text-sm ${
-                    testResult.success
-                      ? 'bg-green-50 border border-green-200 text-green-800 dark:bg-green-900/20 dark:border-green-800 dark:text-green-400'
-                      : 'bg-red-50 border border-red-200 text-red-800 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400'
-                  }`}>
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium">{testResult.success ? '测试成功' : '测试失败'}</span>
-                      {testResult.latency_ms > 0 && <span className="text-xs">延迟: {testResult.latency_ms}ms</span>}
-                    </div>
-                    <div className="mt-1">{testResult.message}</div>
-                  </div>
-                )}
-              </div>
-            )}
-          </Card>
-        ))}
+      {/* 表格 */}
+      <div className="rounded-2xl border bg-card overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-muted/50">
+                <th className="text-left px-4 py-3 font-medium">
+                  <button className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort('name')}>
+                    名称
+                    {sortBy === 'name' && <ArrowUpDown className="h-3 w-3" />}
+                  </button>
+                </th>
+                <th className="text-left px-4 py-3 font-medium">端点</th>
+                <th className="text-center px-4 py-3 font-medium">状态</th>
+                <th className="text-center px-4 py-3 font-medium">模型</th>
+                <th className="text-center px-4 py-3 font-medium">Keys</th>
+                <th className="text-left px-4 py-3 font-medium">
+                  <button className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort('created_at')}>
+                    创建时间
+                    {sortBy === 'created_at' && <ArrowUpDown className="h-3 w-3" />}
+                  </button>
+                </th>
+                <th className="text-center px-4 py-3 font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={7} className="text-center py-12 text-muted-foreground">加载中...</td>
+                </tr>
+              ) : channels.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="text-center py-12 text-muted-foreground">
+                    {search || status ? '没有匹配的渠道' : '暂无渠道，点击上方按钮添加'}
+                  </td>
+                </tr>
+              ) : (
+                channels.map((channel) => {
+                  const models = channel.models || []
+                  return (
+                    <tr key={channel.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                      <td className="px-4 py-3 font-medium">{channel.name}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-1">
+                          {channel.endpoints.map((ep, i) => (
+                            <span key={i} className="inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
+                              {ENDPOINT_LABELS[ep.type] || ep.type}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <button
+                          onClick={() => handleToggleEnabled(channel)}
+                          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors cursor-pointer ${
+                            channel.enabled
+                              ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                              : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+                          }`}
+                        >
+                          {channel.enabled ? '启用' : '禁用'}
+                        </button>
+                      </td>
+                      <td className="px-4 py-3 text-center text-muted-foreground">{models.length}</td>
+                      <td className="px-4 py-3 text-center text-muted-foreground">{channel.api_keys.length}</td>
+                      <td className="px-4 py-3 text-muted-foreground text-xs">{formatDate(channel.created_at)}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-center gap-1">
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setTestChannel(channel)} title="测试">
+                            <Play className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(channel)} title="编辑">
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => setDeleteId(channel.id)} title="删除">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
 
-        {channels.length === 0 && (
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-              <div className="rounded-full bg-gray-100 dark:bg-gray-800 p-3 mb-4">
-                <Plus className="h-6 w-6 text-muted-foreground" />
-              </div>
-              <h3 className="font-medium mb-1">暂无渠道</h3>
-              <p className="text-sm text-muted-foreground mb-4">创建您的第一个渠道来开始使用</p>
-              <Button onClick={() => setShowForm(true)} className="btn-primary">
-                <Plus className="mr-2 h-4 w-4" />
-                添加渠道
+        {/* 分页 */}
+        {total > pageSize && (
+          <div className="flex items-center justify-between px-4 py-3 border-t bg-muted/30">
+            <span className="text-sm text-muted-foreground">共 {total} 条</span>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                disabled={page <= 1}
+                onClick={() => setPage(page - 1)}
+              >
+                <ChevronLeft className="h-4 w-4" />
               </Button>
-            </CardContent>
-          </Card>
+              <span className="px-3 text-sm">{page} / {totalPages}</span>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                disabled={page >= totalPages}
+                onClick={() => setPage(page + 1)}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
         )}
       </div>
+
+      {/* 创建/编辑 Dialog */}
+      <Dialog open={formOpen} onOpenChange={(open) => { if (!open) closeForm() }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editingChannel ? '编辑渠道' : '创建渠道'}</DialogTitle>
+          </DialogHeader>
+          <ChannelForm
+            channel={editingChannel ?? undefined}
+            onSubmit={editingChannel ? handleUpdate : handleCreate}
+            onCancel={closeForm}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* 测试 Dialog */}
+      <TestModelDialog
+        channel={testChannel}
+        open={!!testChannel}
+        onOpenChange={(open) => { if (!open) setTestChannel(null) }}
+      />
+
+      {/* 删除确认 Dialog */}
+      <Dialog open={!!deleteId} onOpenChange={(open) => { if (!open) setDeleteId(null) }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>确认删除</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">确定要删除此渠道吗？此操作不可撤销。</p>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setDeleteId(null)}>取消</Button>
+            <Button variant="destructive" onClick={handleDelete}>删除</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

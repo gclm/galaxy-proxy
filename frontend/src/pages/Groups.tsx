@@ -1,35 +1,88 @@
-import { useEffect, useState } from 'react'
-import { groupsApi } from '@/api'
-import type { Group, CreateGroupRequest } from '@/api/types'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { groupsApi, type GroupListParams } from '@/api/groups'
+import { channelsApi } from '@/api/channels'
+import type { Channel, Group, CreateGroupRequest } from '@/api/types'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { GroupForm } from '@/components/GroupForm'
-import { Plus, Pencil, Trash2, Layers } from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { formatDate } from '@/lib/utils'
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  Search,
+  RefreshCw,
+  ChevronLeft,
+  ChevronRight,
+  ArrowUpDown,
+} from 'lucide-react'
 
 export function Groups() {
   const [groups, setGroups] = useState<Group[]>([])
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
+
+  const [search, setSearch] = useState('')
+  const [status, setStatus] = useState<string>('')
+  const [sortBy, setSortBy] = useState('created_at')
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
+  const [page, setPage] = useState(1)
+  const pageSize = 20
+
+  const [formOpen, setFormOpen] = useState(false)
   const [editingGroup, setEditingGroup] = useState<Group | null>(null)
-  const [showForm, setShowForm] = useState(false)
+  const [deleteId, setDeleteId] = useState<string | null>(null)
 
-  useEffect(() => {
-    fetchGroups()
-  }, [])
+  const [channels, setChannels] = useState<Channel[]>([])
 
-  const fetchGroups = async () => {
+  const fetchGroups = useCallback(async () => {
+    setLoading(true)
     try {
-      const data = await groupsApi.list()
-      setGroups(data)
+      const params: GroupListParams = {
+        search: search || undefined,
+        status: status || undefined,
+        sort_by: sortBy,
+        sort_order: sortOrder,
+        page,
+        page_size: pageSize,
+      }
+      const data = await groupsApi.list(params)
+      setGroups(data.items)
+      setTotal(data.total)
     } catch (error) {
       console.error('Failed to fetch groups:', error)
     } finally {
       setLoading(false)
     }
-  }
+  }, [search, status, sortBy, sortOrder, page])
+
+  useEffect(() => {
+    fetchGroups()
+  }, [fetchGroups])
+
+  useEffect(() => {
+    channelsApi.list().then(res => setChannels(res.items)).catch(console.error)
+  }, [])
+
+  const [searchInput, setSearchInput] = useState('')
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearch(searchInput)
+      setPage(1)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchInput])
+
+  const channelMap = useMemo(() => new Map(channels.map(ch => [ch.id, ch])), [channels])
 
   const handleCreate = async (data: CreateGroupRequest) => {
     await groupsApi.create(data)
-    setShowForm(false)
+    setFormOpen(false)
     fetchGroups()
   }
 
@@ -37,115 +90,211 @@ export function Groups() {
     if (!editingGroup) return
     await groupsApi.update(editingGroup.id, data)
     setEditingGroup(null)
+    setFormOpen(false)
     fetchGroups()
   }
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('确定删除此分组？')) return
-    try {
-      await groupsApi.delete(id)
-      setGroups(groups.filter((g) => g.id !== id))
-    } catch (error) {
-      console.error('Failed to delete group:', error)
+  const handleToggleEnabled = async (group: Group) => {
+    await groupsApi.update(group.id, { enabled: !group.enabled })
+    fetchGroups()
+  }
+
+  const handleDelete = async () => {
+    if (!deleteId) return
+    await groupsApi.delete(deleteId)
+    setDeleteId(null)
+    fetchGroups()
+  }
+
+  const handleSort = (field: string) => {
+    if (sortBy === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortBy(field)
+      setSortOrder('desc')
     }
+    setPage(1)
   }
 
-  if (loading) {
-    return <div className="flex items-center justify-center h-full">加载中...</div>
+  const openEdit = (group: Group) => {
+    setEditingGroup(group)
+    setFormOpen(true)
   }
 
-  if (showForm || editingGroup) {
-    return (
-      <div className="space-y-6">
-        <h1 className="text-2xl font-bold">
-          {editingGroup ? '编辑分组' : '创建分组'}
-        </h1>
-        <GroupForm
-          group={editingGroup ?? undefined}
-          onSubmit={editingGroup ? handleUpdate : handleCreate}
-          onCancel={() => {
-            setShowForm(false)
-            setEditingGroup(null)
-          }}
-        />
-      </div>
-    )
+  const openCreate = () => {
+    setEditingGroup(null)
+    setFormOpen(true)
   }
+
+  const closeForm = () => {
+    setFormOpen(false)
+    setEditingGroup(null)
+  }
+
+  const totalPages = Math.ceil(total / pageSize)
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">分组管理</h1>
-        <Button onClick={() => setShowForm(true)}>
+        <p className="text-sm text-muted-foreground">配置模型分组与负载均衡策略</p>
+        <Button onClick={openCreate} className="btn-primary">
           <Plus className="mr-2 h-4 w-4" />
           添加分组
         </Button>
       </div>
 
-      <div className="grid gap-4">
-        {groups.map((group) => (
-          <Card key={group.id}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0">
-              <div className="flex items-center gap-2">
-                <Layers className="h-5 w-5 text-muted-foreground" />
-                <CardTitle className="text-lg">{group.name}</CardTitle>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setEditingGroup(group)}
-                >
-                  <Pencil className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => handleDelete(group.id)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-2 text-sm text-muted-foreground">
-                {group.match_regex && (
-                  <div>
-                    <span className="font-medium text-foreground">匹配规则:</span>{' '}
-                    <code className="rounded bg-muted px-1 py-0.5">
-                      {group.match_regex}
-                    </code>
-                  </div>
-                )}
-                <div>
-                  <span className="font-medium text-foreground">分组项:</span>{' '}
-                  {group.items.length} 个渠道
-                </div>
-                <div>
-                  <span className="font-medium text-foreground">重试:</span>{' '}
-                  {group.retry_enabled
-                    ? `启用 (最多 ${group.max_retries} 次)`
-                    : '禁用'}
-                </div>
-                <div>
-                  <span className="font-medium text-foreground">状态:</span>{' '}
-                  <span className={group.enabled ? 'text-green-600' : 'text-red-600'}>
-                    {group.enabled ? '启用' : '禁用'}
-                  </span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+      {/* 筛选栏 */}
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <input
+            type="text"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="搜索分组名称..."
+            className="input pl-9"
+          />
+        </div>
+        <select
+          value={status}
+          onChange={(e) => { setStatus(e.target.value); setPage(1) }}
+          className="input w-28"
+        >
+          <option value="">全部状态</option>
+          <option value="enabled">启用</option>
+          <option value="disabled">禁用</option>
+        </select>
+        <Button variant="outline" size="icon" onClick={fetchGroups} title="刷新">
+          <RefreshCw className="h-4 w-4" />
+        </Button>
+      </div>
 
-        {groups.length === 0 && (
-          <Card>
-            <CardContent className="flex items-center justify-center py-8 text-muted-foreground">
-              暂无分组，点击上方按钮添加
-            </CardContent>
-          </Card>
+      {/* 表格 */}
+      <div className="rounded-2xl border bg-card overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-muted/50">
+                <th className="text-left px-4 py-3 font-medium">
+                  <button className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort('name')}>
+                    名称
+                    {sortBy === 'name' && <ArrowUpDown className="h-3 w-3" />}
+                  </button>
+                </th>
+                <th className="text-left px-4 py-3 font-medium">匹配规则</th>
+                <th className="text-center px-4 py-3 font-medium">渠道数</th>
+                <th className="text-center px-4 py-3 font-medium">重试</th>
+                <th className="text-center px-4 py-3 font-medium">状态</th>
+                <th className="text-left px-4 py-3 font-medium">
+                  <button className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort('created_at')}>
+                    创建时间
+                    {sortBy === 'created_at' && <ArrowUpDown className="h-3 w-3" />}
+                  </button>
+                </th>
+                <th className="text-center px-4 py-3 font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={7} className="text-center py-12 text-muted-foreground">加载中...</td>
+                </tr>
+              ) : groups.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="text-center py-12 text-muted-foreground">
+                    {search || status ? '没有匹配的分组' : '暂无分组，点击上方按钮添加'}
+                  </td>
+                </tr>
+              ) : (
+                groups.map((group) => (
+                  <tr key={group.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                    <td className="px-4 py-3 font-medium">{group.name}</td>
+                    <td className="px-4 py-3">
+                      {group.match_regex ? (
+                        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{group.match_regex}</code>
+                      ) : (
+                        <span className="text-muted-foreground text-xs">精确匹配</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-center text-muted-foreground">{group.items.length}</td>
+                    <td className="px-4 py-3 text-center text-muted-foreground text-xs">
+                      {group.retry_enabled ? `${group.max_retries} 次` : '关闭'}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <button
+                        onClick={() => handleToggleEnabled(group)}
+                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors cursor-pointer ${
+                          group.enabled
+                            ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                            : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+                        }`}
+                      >
+                        {group.enabled ? '启用' : '禁用'}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground text-xs">{formatDate(group.created_at)}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-center gap-1">
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(group)} title="编辑">
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => setDeleteId(group.id)} title="删除">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* 分页 */}
+        {total > pageSize && (
+          <div className="flex items-center justify-between px-4 py-3 border-t bg-muted/30">
+            <span className="text-sm text-muted-foreground">共 {total} 条</span>
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage(page - 1)}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="px-3 text-sm">{page} / {totalPages}</span>
+              <Button variant="outline" size="icon" className="h-8 w-8" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
         )}
       </div>
+
+      {/* 创建/编辑 Dialog */}
+      <Dialog open={formOpen} onOpenChange={(open) => { if (!open) closeForm() }}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>{editingGroup ? '编辑分组' : '创建分组'}</DialogTitle>
+          </DialogHeader>
+          <GroupForm
+            group={editingGroup ?? undefined}
+            channels={channels}
+            onSubmit={editingGroup ? handleUpdate : handleCreate}
+            onCancel={closeForm}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* 删除确认 Dialog */}
+      <Dialog open={!!deleteId} onOpenChange={(open) => { if (!open) setDeleteId(null) }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>确认删除</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">确定要删除此分组吗？此操作不可撤销。</p>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setDeleteId(null)}>取消</Button>
+            <Button variant="destructive" onClick={handleDelete}>删除</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

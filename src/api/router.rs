@@ -16,16 +16,18 @@ use crate::api::handlers::admin::channels::{self, ChannelState};
 use crate::api::handlers::admin::fetch_models::{self, FetchModelsState};
 use crate::api::handlers::admin::groups::{self, GroupState};
 use crate::api::handlers::admin::pricing::{self, PricingState};
+use crate::api::handlers::admin::settings::{self, SettingsState};
 use crate::api::handlers::admin::stats::{self, StatsApiState};
+use crate::api::handlers::admin::system_info::{self, SystemInfoState};
 use crate::api::handlers::admin::test_model::{self, TestModelState};
 use crate::api::handlers::proxy::{chat, embeddings, images, messages, models, responses};
-use crate::config::QueuingConfig;
+use crate::config::{AppConfig, QueuingConfig};
 use crate::proxy::ProxyState;
 use crate::static_assets;
 use crate::stats::StatsState;
 
 /// 创建应用路由
-pub fn create_router(pool: SqlitePool, jwt_secret: String, queuing: &QueuingConfig) -> Router {
+pub fn create_router(pool: SqlitePool, jwt_secret: String, queuing: &QueuingConfig, server_addr: &str, config: AppConfig) -> Router {
     let auth_state = AuthState {
         pool: pool.clone(),
         jwt_service: crate::auth::JwtService::new(&jwt_secret, 24),
@@ -57,6 +59,18 @@ pub fn create_router(pool: SqlitePool, jwt_secret: String, queuing: &QueuingConf
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .expect("Failed to create HTTP client"),
+        pool: pool.clone(),
+        server_addr: server_addr.to_string(),
+    };
+
+    let system_info_state = SystemInfoState {
+        pool: pool.clone(),
+        start_time: std::sync::Arc::new(std::time::Instant::now()),
+    };
+
+    let settings_state = SettingsState {
+        pool: pool.clone(),
+        config: std::sync::Arc::new(config),
     };
 
     let proxy_state = if queuing.enabled {
@@ -88,6 +102,10 @@ pub fn create_router(pool: SqlitePool, jwt_secret: String, queuing: &QueuingConf
         .nest("/api/v1/admin/stats", stats_routes(stats_state))
         // 管理 API 路由 - 定价
         .nest("/api/v1/admin/pricing", pricing_routes(pricing_state))
+        // 管理 API 路由 - 系统信息
+        .nest("/api/v1/admin", system_info_routes(system_info_state))
+        // 管理 API 路由 - 设置
+        .nest("/api/v1/admin/settings", settings_routes(settings_state))
         // 静态文件服务（SPA fallback）
         .fallback(static_assets::serve)
         // 注入 pool 和 JWT secret 到 extensions
@@ -226,6 +244,8 @@ fn stats_routes(stats_state: StatsApiState) -> Router {
         .route("/models", get(stats::models))
         .route("/channels", get(stats::channels))
         .route("/daily", get(stats::daily))
+        .route("/logs", get(stats::logs))
+        .route("/logs/{id}", get(stats::log_detail))
         .with_state(stats_state)
 }
 
@@ -235,4 +255,20 @@ fn pricing_routes(pricing_state: PricingState) -> Router {
         .route("/", get(pricing::list).put(pricing::update))
         .route("/{model}", get(pricing::get))
         .with_state(pricing_state)
+}
+
+/// 系统信息路由
+fn system_info_routes(system_info_state: SystemInfoState) -> Router {
+    Router::new()
+        .route("/system-info", get(system_info::get))
+        .with_state(system_info_state)
+}
+
+/// 设置路由
+fn settings_routes(settings_state: SettingsState) -> Router {
+    Router::new()
+        .route("/", get(settings::list))
+        .route("/infra", get(settings::infra))
+        .route("/{key}", put(settings::update))
+        .with_state(settings_state)
 }

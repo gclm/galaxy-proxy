@@ -27,23 +27,39 @@
   --color-chart-3: hsl(197 37% 24%);
   --color-chart-4: hsl(43 74% 66%);
   --color-chart-5: hsl(27 87% 67%);
-  --color-sidebar-background: hsl(0 0% 98%);
-  --color-sidebar-foreground: hsl(240 5.3% 26.1%);
+  --color-sidebar-background: hsl(220 14% 96%);
+  --color-sidebar-foreground: hsl(220 9% 20%);
   --color-sidebar-primary: hsl(221 83% 53%);
   --color-sidebar-primary-foreground: hsl(0 0% 98%);
-  --color-sidebar-accent: hsl(240 4.8% 95.9%);
-  --color-sidebar-accent-foreground: hsl(240 5.9% 10%);
+  --color-sidebar-accent: hsl(221 83% 53% / 0.08);
+  --color-sidebar-accent-foreground: hsl(220 9% 20%);
   --color-sidebar-border: hsl(220 13% 91%);
   --color-sidebar-ring: hsl(217.2 91.2% 59.8%);
   --radius: 0.75rem;
+  --animate-in: enter var(--tw-animate-duration, 150ms) var(--tw-animate-ease, ease-out);
+  --animate-out: exit var(--tw-animate-duration, 150ms) var(--tw-animate-ease, ease-in);
+  --animate-fade-in: fade-in var(--tw-animate-duration, 150ms) var(--tw-animate-ease, ease-out);
+  --animate-fade-out: fade-out var(--tw-animate-duration, 150ms) var(--tw-animate-ease, ease-in);
+  --animate-zoom-in: zoom-in var(--tw-animate-duration, 200ms) var(--tw-animate-ease, ease-out);
+  --animate-zoom-out: zoom-out var(--tw-animate-duration, 200ms) var(--tw-animate-ease, ease-in);
+  @keyframes enter {
+    from { opacity: var(--tw-enter-opacity, 0); transform: translate3d(var(--tw-enter-translate-x, 0), var(--tw-enter-translate-y, 0), 0) scale3d(var(--tw-enter-scale, 1), var(--tw-enter-scale, 1), var(--tw-enter-scale, 1)); }
+  }
+  @keyframes exit {
+    to { opacity: var(--tw-exit-opacity, 0); transform: translate3d(var(--tw-exit-translate-x, 0), var(--tw-exit-translate-y, 0), 0) scale3d(var(--tw-exit-scale, 1), var(--tw-exit-scale, 1), var(--tw-exit-scale, 1)); }
+  }
+  @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes fade-out { from { opacity: 1; } to { opacity: 0; } }
+  @keyframes zoom-in { from { transform: translate(-50%, -50%) scale(0.95); } to { transform: translate(-50%, -50%) scale(1); } }
+  @keyframes zoom-out { from { transform: translate(-50%, -50%) scale(1); } to { transform: translate(-50%, -50%) scale(0.95); } }
 }
 
 .dark {
-  --color-background: hsl(0 0% 3.9%);
+  --color-background: hsl(222 47% 5%);
   --color-foreground: hsl(0 0% 98%);
-  --color-card: hsl(0 0% 5.5%);
+  --color-card: hsl(222 47% 7%);
   --color-card-foreground: hsl(0 0% 98%);
-  --color-popover: hsl(0 0% 3.9%);
+  --color-popover: hsl(222 47% 5%);
   --color-popover-foreground: hsl(0 0% 98%);
   --color-primary: hsl(217 91% 60%);
   --color-primary-foreground: hsl(0 0% 98%);
@@ -63,13 +79,13 @@
   --color-chart-3: hsl(30 80% 55%);
   --color-chart-4: hsl(280 65% 60%);
   --color-chart-5: hsl(340 75% 55%);
-  --color-sidebar-background: hsl(240 5.9% 10%);
-  --color-sidebar-foreground: hsl(240 4.8% 95.9%);
+  --color-sidebar-background: hsl(222 47% 6%);
+  --color-sidebar-foreground: hsl(0 0% 85%);
   --color-sidebar-primary: hsl(217 91% 60%);
   --color-sidebar-primary-foreground: hsl(0 0% 100%);
-  --color-sidebar-accent: hsl(240 3.7% 15.9%);
-  --color-sidebar-accent-foreground: hsl(240 4.8% 95.9%);
-  --color-sidebar-border: hsl(240 3.7% 15.9%);
+  --color-sidebar-accent: hsl(217 91% 60% / 0.12);
+  --color-sidebar-accent-foreground: hsl(0 0% 90%);
+  --color-sidebar-border: hsl(0 0% 14.9%);
   --color-sidebar-ring: hsl(217.2 91.2% 59.8%);
 }
 
@@ -83,9 +99,18 @@
   }
 
   body {
-    @apply bg-background text-foreground;
-    @apply min-h-screen;
+    @apply bg-background text-foreground min-h-screen;
     margin: 0;
+    background-image:
+      radial-gradient(1200px circle at 12% -18%, hsl(221 83% 53% / 0.04), transparent 58%),
+      radial-gradient(900px circle at 90% -12%, hsl(40 96% 56% / 0.03), transparent 55%);
+    background-attachment: fixed;
+  }
+
+  .dark body {
+    background-image:
+      radial-gradient(1500px circle at 10% -18%, hsl(217 91% 60% / 0.08), transparent 68%),
+      radial-gradient(620px circle at 86% -8%, hsl(40 96% 56% / 0.04), transparent 62%);
   }
 
   ::selection {
@@ -94,7 +119,6 @@
 }
 
 @layer components {
-  /* 按钮样式 */
   .btn-primary {
     @apply bg-gradient-to-r from-primary to-primary/90;
     @apply text-primary-foreground shadow-md shadow-primary/25;
@@ -102,16 +126,14 @@
     @apply active:scale-[0.98] transition-all duration-200;
   }
 
-  /* 卡片样式 */
   .card-hover {
     @apply hover:-translate-y-0.5 hover:shadow-lg;
     @apply transition-all duration-200;
   }
 
-  /* 输入框样式 */
   .input {
     @apply w-full rounded-xl px-4 py-2.5 text-sm;
-    @apply bg-white dark:bg-gray-800;
+    @apply bg-white dark:bg-gray-800/50;
     @apply border border-gray-200 dark:border-gray-700;
     @apply text-gray-900 dark:text-gray-100;
     @apply placeholder:text-gray-400 dark:placeholder:text-gray-500;

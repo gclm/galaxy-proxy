@@ -127,24 +127,32 @@ impl<S: Send + Sync> FromRequestParts<S> for ApiKeyAuth {
         _state: &S,
     ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
         async move {
-            // 提取 Authorization header
-            let TypedHeader(Authorization(bearer)) = parts
+            // 优先从 Authorization: Bearer 提取，回退到 x-api-key（Anthropic 兼容）
+            let api_key = match parts
                 .extract::<TypedHeader<Authorization<Bearer>>>()
                 .await
-                .map_err(|_| {
-                    (
-                        StatusCode::UNAUTHORIZED,
-                        axum::Json(serde_json::json!({
-                            "error": { "message": "缺少 API Key", "type": "authentication_error" }
-                        })),
-                    )
-                })?;
+            {
+                Ok(TypedHeader(Authorization(bearer))) => bearer.token().to_string(),
+                Err(_) => parts
+                    .headers
+                    .get("x-api-key")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string())
+                    .unwrap_or_default(),
+            };
 
-            let api_key = bearer.token();
+            if api_key.is_empty() {
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    axum::Json(serde_json::json!({
+                        "error": { "message": "缺少 API Key", "type": "authentication_error" }
+                    })),
+                ));
+            }
 
             // 1. 检查缓存
             if let Some(cache) = parts.extensions.get::<ApiKeyCache>() {
-                if let Some((id, name, enabled)) = cache.get(api_key).await {
+                if let Some((id, name, enabled)) = cache.get(&api_key).await {
                     if !enabled {
                         return Err((
                             StatusCode::FORBIDDEN,
@@ -170,7 +178,7 @@ impl<S: Send + Sync> FromRequestParts<S> for ApiKeyAuth {
             let result = sqlx::query_as::<_, (String, String, bool)>(
                 "SELECT id, name, enabled FROM api_keys WHERE api_key = ?",
             )
-            .bind(api_key)
+            .bind(&api_key)
             .fetch_optional(pool)
             .await
             .map_err(|_| {
@@ -184,9 +192,8 @@ impl<S: Send + Sync> FromRequestParts<S> for ApiKeyAuth {
 
             match result {
                 Some((id, name, enabled)) => {
-                    // 3. 写入缓存
                     if let Some(cache) = parts.extensions.get::<ApiKeyCache>() {
-                        cache.set(api_key.to_string(), id.clone(), name.clone(), enabled).await;
+                        cache.set(api_key, id.clone(), name.clone(), enabled).await;
                     }
                     if !enabled {
                         return Err((

@@ -5,10 +5,21 @@ import type {
   CreateGroupRequest,
   UpdateGroupRequest,
   AddGroupItemRequest,
+  PaginatedResponse,
 } from './types'
 
+export interface GroupListParams {
+  search?: string
+  status?: string
+  sort_by?: string
+  sort_order?: string
+  page?: number
+  page_size?: number
+}
+
 export const groupsApi = {
-  list: () => apiClient.get<Group[]>('/groups'),
+  list: (params?: GroupListParams) =>
+    apiClient.get<PaginatedResponse<Group>>('/groups', params as Record<string, string | number | undefined>),
 
   get: (id: string) => apiClient.get<Group>(`/groups/${id}`),
 

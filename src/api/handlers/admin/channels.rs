@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
@@ -7,6 +7,24 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 use crate::api::{response::generate_id, ApiError, ApiResponse};
+
+/// 列表查询参数
+#[derive(Debug, Deserialize)]
+pub struct ListChannelsQuery {
+    pub search: Option<String>,
+    pub status: Option<String>,
+    pub sort_by: Option<String>,
+    pub sort_order: Option<String>,
+    pub page: Option<i32>,
+    pub page_size: Option<i32>,
+}
+
+/// 分页响应
+#[derive(Debug, Serialize)]
+pub struct PaginatedResponse<T: Serialize> {
+    pub items: Vec<T>,
+    pub total: i64,
+}
 
 /// 端点类型
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -26,6 +44,17 @@ pub enum EndpointType {
 
 impl EndpointType {
     /// 获取端点路径
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::OpenAiChat => "openai_chat",
+            Self::OpenAiResponse => "openai_response",
+            Self::Anthropic => "anthropic",
+            Self::Gemini => "gemini",
+            Self::OpenAiEmbedding => "openai_embedding",
+            Self::OpenAiImages => "openai_images",
+        }
+    }
+
     pub fn path(&self) -> &'static str {
         match self {
             Self::OpenAiChat => "/chat/completions",
@@ -53,7 +82,7 @@ pub struct Channel {
     pub name: String,
     pub api_keys: Vec<String>,
     pub endpoints: Vec<EndpointConfig>,
-    pub models: serde_json::Value,
+    pub models: Vec<String>,
     pub rate_limit_rpm: Option<i32>,
     pub rate_limit_tpm: Option<i32>,
     pub failure_threshold: i32,
@@ -70,7 +99,7 @@ pub struct CreateChannelRequest {
     pub name: String,
     pub api_keys: Vec<String>,
     pub endpoints: Vec<EndpointConfig>,
-    pub models: Option<serde_json::Value>,
+    pub models: Option<Vec<String>>,
     pub rate_limit_rpm: Option<i32>,
     pub rate_limit_tpm: Option<i32>,
     pub failure_threshold: Option<i32>,
@@ -85,7 +114,7 @@ pub struct UpdateChannelRequest {
     pub name: Option<String>,
     pub api_keys: Option<Vec<String>>,
     pub endpoints: Option<Vec<EndpointConfig>>,
-    pub models: Option<serde_json::Value>,
+    pub models: Option<Vec<String>>,
     pub rate_limit_rpm: Option<i32>,
     pub rate_limit_tpm: Option<i32>,
     pub failure_threshold: Option<i32>,
@@ -100,61 +129,83 @@ pub struct ChannelState {
     pub pool: SqlitePool,
 }
 
-/// 获取渠道列表
+/// 获取渠道列表（支持搜索、筛选、排序、分页）
 pub async fn list(
     State(state): State<ChannelState>,
-) -> Result<Json<ApiResponse<Vec<Channel>>>, (StatusCode, Json<ApiError>)> {
-    let channels = sqlx::query_as::<_, (String, String, String, String, String, Option<i32>, Option<i32>, i32, i32, i32, bool, String, String)>(
-        "SELECT id, name, api_keys, endpoints, models, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at FROM channels ORDER BY created_at DESC"
-    )
-    .fetch_all(&state.pool)
-    .await
-    .map_err(|e| ApiError::internal_error(e.to_string()))?;
+    Query(query): Query<ListChannelsQuery>,
+) -> Result<Json<ApiResponse<PaginatedResponse<Channel>>>, (StatusCode, Json<ApiError>)> {
+    let page = query.page.unwrap_or(1).max(1);
+    let page_size = query.page_size.unwrap_or(20).clamp(1, 100);
+    let offset = (page - 1) * page_size;
 
-    let result: Vec<Channel> = channels
-        .into_iter()
-        .map(
-            |(
-                id,
-                name,
-                api_keys_str,
-                endpoints_str,
-                models_str,
-                rate_limit_rpm,
-                rate_limit_tpm,
-                failure_threshold,
-                blacklist_minutes,
-                concurrency,
-                enabled,
-                created_at,
-                updated_at,
-            )| {
-                let api_keys: Vec<String> = serde_json::from_str(&api_keys_str).unwrap_or_default();
-                let endpoints: Vec<EndpointConfig> =
-                    serde_json::from_str(&endpoints_str).unwrap_or_default();
-                let models: serde_json::Value =
-                    serde_json::from_str(&models_str).unwrap_or_default();
+    let order_field = match query.sort_by.as_deref() {
+        Some("name") => "name",
+        _ => "created_at",
+    };
+    let order_dir = match query.sort_order.as_deref() {
+        Some("asc") => "ASC",
+        _ => "DESC",
+    };
 
-                Channel {
-                    id,
-                    name,
-                    api_keys,
-                    endpoints,
-                    models,
-                    rate_limit_rpm,
-                    rate_limit_tpm,
-                    failure_threshold,
-                    blacklist_minutes,
-                    concurrency,
-                    enabled,
-                    created_at,
-                    updated_at,
-                }
-            },
-        )
+    // 构建 COUNT 查询
+    let mut count_builder = sqlx::QueryBuilder::new("SELECT COUNT(*) FROM channels");
+    let _has_where = push_where(&mut count_builder, &query);
+
+    let count_row = count_builder
+        .build()
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|e| ApiError::internal_error(e.to_string()))?;
+    let total: i64 = sqlx::Row::get(&count_row, 0);
+
+    // 构建数据查询
+    let mut data_builder = sqlx::QueryBuilder::new(
+        "SELECT id, name, api_keys, endpoints, models, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at FROM channels",
+    );
+    push_where(&mut data_builder, &query);
+    data_builder.push(format!(" ORDER BY {} {} ", order_field, order_dir));
+    data_builder.push(" LIMIT ");
+    data_builder.push_bind(page_size);
+    data_builder.push(" OFFSET ");
+    data_builder.push_bind(offset);
+
+    let rows = data_builder
+        .build()
+        .fetch_all(&state.pool)
+        .await
+        .map_err(|e| ApiError::internal_error(e.to_string()))?;
+
+    let items: Vec<Channel> = rows
+        .iter()
+        .map(|row| row_to_channel_from_row(row))
         .collect();
 
-    Ok(Json(ApiResponse::success(result)))
+    Ok(Json(ApiResponse::success(PaginatedResponse { items, total })))
+}
+
+fn push_where(builder: &mut sqlx::QueryBuilder<sqlx::Sqlite>, query: &ListChannelsQuery) -> bool {
+    let mut has_where = false;
+
+    if let Some(ref search) = query.search {
+        if !search.is_empty() {
+            builder.push(" WHERE name LIKE ");
+            builder.push_bind(format!("%{}%", search));
+            has_where = true;
+        }
+    }
+    if let Some(ref status) = query.status {
+        let enabled_val = match status.as_str() {
+            "enabled" => Some(true),
+            "disabled" => Some(false),
+            _ => None,
+        };
+        if let Some(v) = enabled_val {
+            builder.push(if has_where { " AND enabled = " } else { " WHERE enabled = " });
+            builder.push_bind(v);
+            has_where = true;
+        }
+    }
+    has_where
 }
 
 /// 创建渠道
@@ -318,27 +369,17 @@ async fn get_channel_by_id(
     .await
     .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
-    let (
-        id,
-        name,
-        api_keys_str,
-        endpoints_str,
-        models_str,
-        rate_limit_rpm,
-        rate_limit_tpm,
-        failure_threshold,
-        blacklist_minutes,
-        concurrency,
-        enabled,
-        created_at,
-        updated_at,
-    ) = result.ok_or_else(|| ApiError::not_found("渠道不存在"))?;
+    let row = result.ok_or_else(|| ApiError::not_found("渠道不存在"))?;
+    Ok(row_to_channel(row))
+}
 
+fn row_to_channel(
+    (id, name, api_keys_str, endpoints_str, models_str, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, enabled, created_at, updated_at): (String, String, String, String, String, Option<i32>, Option<i32>, i32, i32, i32, bool, String, String),
+) -> Channel {
     let api_keys: Vec<String> = serde_json::from_str(&api_keys_str).unwrap_or_default();
     let endpoints: Vec<EndpointConfig> = serde_json::from_str(&endpoints_str).unwrap_or_default();
-    let models: serde_json::Value = serde_json::from_str(&models_str).unwrap_or_default();
-
-    Ok(Channel {
+    let models: Vec<String> = serde_json::from_str(&models_str).unwrap_or_default();
+    Channel {
         id,
         name,
         api_keys,
@@ -352,5 +393,24 @@ async fn get_channel_by_id(
         enabled,
         created_at,
         updated_at,
-    })
+    }
+}
+
+fn row_to_channel_from_row(row: &sqlx::sqlite::SqliteRow) -> Channel {
+    use sqlx::Row;
+    Channel {
+        id: row.get("id"),
+        name: row.get("name"),
+        api_keys: serde_json::from_str(&row.get::<String, _>("api_keys")).unwrap_or_default(),
+        endpoints: serde_json::from_str(&row.get::<String, _>("endpoints")).unwrap_or_default(),
+        models: serde_json::from_str(&row.get::<String, _>("models")).unwrap_or_default(),
+        rate_limit_rpm: row.get("rate_limit_rpm"),
+        rate_limit_tpm: row.get("rate_limit_tpm"),
+        failure_threshold: row.get("failure_threshold"),
+        blacklist_minutes: row.get("blacklist_minutes"),
+        concurrency: row.get("concurrency"),
+        enabled: row.get("enabled"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+    }
 }

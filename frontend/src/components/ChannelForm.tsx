@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import type { Channel, CreateChannelRequest, EndpointConfig, EndpointType, ModelsConfig } from '@/api/types'
+import type { Channel, CreateChannelRequest, EndpointConfig, EndpointType } from '@/api/types'
+import { ENDPOINT_LABELS } from '@/api/types'
 import { channelsApi } from '@/api/channels'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Plus, Trash2, RefreshCw, X } from 'lucide-react'
 
 interface ChannelFormProps {
@@ -20,27 +20,13 @@ const ENDPOINT_TYPES: EndpointType[] = [
   'openai_images',
 ]
 
-const ENDPOINT_LABELS: Record<EndpointType, string> = {
-  openai_chat: 'OpenAI Chat',
-  openai_response: 'OpenAI Responses',
-  anthropic: 'Anthropic',
-  gemini: 'Gemini',
-  openai_embedding: 'OpenAI Embedding',
-  openai_images: 'OpenAI Images',
-}
-
 export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
   const [name, setName] = useState(channel?.name ?? '')
   const [apiKeys, setApiKeys] = useState<string[]>(channel?.api_keys ?? [''])
   const [endpoints, setEndpoints] = useState<EndpointConfig[]>(
     channel?.endpoints ?? [{ type: 'openai_chat', base_url: '' }]
   )
-  const [modelsConfig, setModelsConfig] = useState<ModelsConfig>(
-    channel?.models ?? { available_models: [], model_maps: {} }
-  )
-  const [modelMapsText, setModelMapsText] = useState(
-    channel?.models?.model_maps ? JSON.stringify(channel.models.model_maps, null, 2) : ''
-  )
+  const [models, setModels] = useState<string[]>(channel?.models ?? [])
   const [rateLimitRpm, setRateLimitRpm] = useState(channel?.rate_limit_rpm?.toString() ?? '')
   const [rateLimitTpm, setRateLimitTpm] = useState(channel?.rate_limit_tpm?.toString() ?? '')
   const [failureThreshold, setFailureThreshold] = useState(channel?.failure_threshold?.toString() ?? '3')
@@ -49,7 +35,7 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
   const [enabled, setEnabled] = useState(channel?.enabled ?? true)
   const [submitting, setSubmitting] = useState(false)
   const [fetchingModels, setFetchingModels] = useState(false)
-  const [fetchFailed, setFetchFailed] = useState(false)
+  const [fetchError, setFetchError] = useState('')
   const [manualModelInput, setManualModelInput] = useState('')
 
   const handleFetchModels = async () => {
@@ -62,18 +48,15 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
     }
 
     setFetchingModels(true)
-    setFetchFailed(false)
+    setFetchError('')
     try {
-      const models = await channelsApi.fetchModels({
+      const fetched = await channelsApi.fetchModels({
         endpoints: validEndpoints,
         api_key: apiKey,
       })
-      setModelsConfig(prev => ({
-        ...prev,
-        available_models: models,
-      }))
-    } catch (error: any) {
-      setFetchFailed(true)
+      setModels(fetched)
+    } catch (e: any) {
+      setFetchError(e?.message || '获取模型失败')
     } finally {
       setFetchingModels(false)
     }
@@ -81,20 +64,14 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
 
   const addManualModel = () => {
     const model = manualModelInput.trim()
-    if (model && !modelsConfig.available_models.includes(model)) {
-      setModelsConfig(prev => ({
-        ...prev,
-        available_models: [...prev.available_models, model],
-      }))
+    if (model && !models.includes(model)) {
+      setModels(prev => [...prev, model])
       setManualModelInput('')
     }
   }
 
   const removeModel = (model: string) => {
-    setModelsConfig(prev => ({
-      ...prev,
-      available_models: prev.available_models.filter(m => m !== model),
-    }))
+    setModels(prev => prev.filter(m => m !== model))
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -106,6 +83,7 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
         name,
         api_keys: apiKeys.filter((k) => k.trim()),
         endpoints: endpoints.filter((ep) => ep.base_url.trim()),
+        models,
         enabled,
         failure_threshold: parseInt(failureThreshold) || 3,
         blacklist_minutes: parseInt(blacklistMinutes) || 5,
@@ -114,23 +92,6 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
 
       if (rateLimitRpm) data.rate_limit_rpm = parseInt(rateLimitRpm)
       if (rateLimitTpm) data.rate_limit_tpm = parseInt(rateLimitTpm)
-
-      // 解析 model_maps
-      let modelMaps: Record<string, string> = {}
-      if (modelMapsText.trim()) {
-        try {
-          modelMaps = JSON.parse(modelMapsText)
-        } catch {
-          alert('模型映射 JSON 格式错误')
-          return
-        }
-      }
-
-      // 构建 models 配置
-      data.models = {
-        available_models: modelsConfig.available_models,
-        model_maps: modelMaps,
-      }
 
       await onSubmit(data)
     } finally {
@@ -155,236 +116,172 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{channel ? '编辑渠道' : '创建渠道'}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="space-y-4">
-            <h3 className="text-sm font-medium">基本信息</h3>
-            <div>
-              <label className="block text-sm font-medium mb-1">渠道名称 *</label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                placeholder="例如：OpenAI 主力渠道"
-                required
-              />
-            </div>
+    <form onSubmit={handleSubmit} className="space-y-5 px-1">
+      {/* 基本信息 */}
+      <section className="space-y-3">
+        <h3 className="text-sm font-medium text-muted-foreground">基本信息</h3>
+        <div>
+          <label className="block text-sm font-medium mb-1">渠道名称 *</label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="input"
+            placeholder="例如：OpenAI 主力渠道"
+            required
+          />
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} className="rounded" />
+          启用渠道
+        </label>
+      </section>
 
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="enabled"
-                checked={enabled}
-                onChange={(e) => setEnabled(e.target.checked)}
-                className="rounded"
-              />
-              <label htmlFor="enabled" className="text-sm">启用渠道</label>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium">上游 API Keys *</h3>
-              <Button type="button" variant="outline" size="sm" onClick={addApiKey}>
-                <Plus className="h-4 w-4 mr-1" /> 添加
+      {/* API Keys */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium text-muted-foreground">上游 API Keys *</h3>
+          <Button type="button" variant="outline" size="sm" onClick={addApiKey}>
+            <Plus className="h-4 w-4 mr-1" /> 添加
+          </Button>
+        </div>
+        {apiKeys.map((key, index) => (
+          <div key={index} className="flex gap-2">
+            <input
+              type="text"
+              value={key}
+              onChange={(e) => updateApiKey(index, e.target.value)}
+              className="input font-mono"
+              placeholder="sk-..."
+            />
+            {apiKeys.length > 1 && (
+              <Button type="button" variant="ghost" size="icon" onClick={() => removeApiKey(index)}>
+                <Trash2 className="h-4 w-4" />
               </Button>
-            </div>
-            {apiKeys.map((key, index) => (
-              <div key={index} className="flex gap-2">
-                <input
-                  type="text"
-                  value={key}
-                  onChange={(e) => updateApiKey(index, e.target.value)}
-                  className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
-                  placeholder="sk-..."
-                />
-                {apiKeys.length > 1 && (
-                  <Button type="button" variant="ghost" size="icon" onClick={() => removeApiKey(index)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                )}
-              </div>
-            ))}
-          </div>
-
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium">端点配置 *</h3>
-              <Button type="button" variant="outline" size="sm" onClick={addEndpoint}>
-                <Plus className="h-4 w-4 mr-1" /> 添加
-              </Button>
-            </div>
-            {endpoints.map((ep, index) => (
-              <div key={index} className="flex gap-2">
-                <select
-                  value={ep.type}
-                  onChange={(e) => updateEndpoint(index, 'type', e.target.value)}
-                  className="rounded-md border border-input bg-background px-3 py-2 text-sm"
-                >
-                  {ENDPOINT_TYPES.map((t) => (
-                    <option key={t} value={t}>{ENDPOINT_LABELS[t]}</option>
-                  ))}
-                </select>
-                <input
-                  type="text"
-                  value={ep.base_url}
-                  onChange={(e) => updateEndpoint(index, 'base_url', e.target.value)}
-                  className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  placeholder="https://api.openai.com/v1"
-                />
-                {endpoints.length > 1 && (
-                  <Button type="button" variant="ghost" size="icon" onClick={() => removeEndpoint(index)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                )}
-              </div>
-            ))}
-          </div>
-
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium">模型配置</h3>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleFetchModels}
-                disabled={fetchingModels}
-              >
-                <RefreshCw className={`h-4 w-4 mr-1 ${fetchingModels ? 'animate-spin' : ''}`} />
-                {fetchingModels ? '获取中...' : '获取模型'}
-              </Button>
-            </div>
-
-            {fetchFailed && (
-              <div className="rounded-md bg-yellow-50 border border-yellow-200 p-3 text-sm text-yellow-800">
-                获取模型失败，请手动添加模型
-              </div>
             )}
-
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                可用模型 ({modelsConfig.available_models.length})
-              </label>
-              <div className="flex gap-2 mb-2">
-                <input
-                  type="text"
-                  value={manualModelInput}
-                  onChange={(e) => setManualModelInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addManualModel())}
-                  className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  placeholder="输入模型名称，回车添加"
-                />
-                <Button type="button" variant="outline" size="sm" onClick={addManualModel}>
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </div>
-              {modelsConfig.available_models.length > 0 && (
-                <div className="max-h-40 overflow-y-auto rounded-md border border-input bg-background p-2 text-sm">
-                  <div className="flex flex-wrap gap-1">
-                    {modelsConfig.available_models.map((model) => (
-                      <span
-                        key={model}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-secondary text-secondary-foreground text-xs"
-                      >
-                        {model}
-                        <button
-                          type="button"
-                          onClick={() => removeModel(model)}
-                          className="hover:text-destructive"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">模型映射 (JSON)</label>
-              <textarea
-                value={modelMapsText}
-                onChange={(e) => setModelMapsText(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
-                rows={4}
-                placeholder={'{\n  "gpt-4": "gpt-4-turbo"\n}'}
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                将请求的模型名映射到实际上游模型名
-              </p>
-            </div>
           </div>
+        ))}
+      </section>
 
-          <div className="space-y-4">
-            <h3 className="text-sm font-medium">高级配置</h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">RPM 限制</label>
-                <input
-                  type="number"
-                  value={rateLimitRpm}
-                  onChange={(e) => setRateLimitRpm(e.target.value)}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  placeholder="不限"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">TPM 限制</label>
-                <input
-                  type="number"
-                  value={rateLimitTpm}
-                  onChange={(e) => setRateLimitTpm(e.target.value)}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  placeholder="不限"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">失败阈值</label>
-                <input
-                  type="number"
-                  value={failureThreshold}
-                  onChange={(e) => setFailureThreshold(e.target.value)}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">黑名单分钟</label>
-                <input
-                  type="number"
-                  value={blacklistMinutes}
-                  onChange={(e) => setBlacklistMinutes(e.target.value)}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">并发数</label>
-                <input
-                  type="number"
-                  value={concurrency}
-                  onChange={(e) => setConcurrency(e.target.value)}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                />
-              </div>
-            </div>
+      {/* 端点配置 */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium text-muted-foreground">端点配置 *</h3>
+          <Button type="button" variant="outline" size="sm" onClick={addEndpoint}>
+            <Plus className="h-4 w-4 mr-1" /> 添加
+          </Button>
+        </div>
+        {endpoints.map((ep, index) => (
+          <div key={index} className="flex gap-2">
+            <select
+              value={ep.type}
+              onChange={(e) => updateEndpoint(index, 'type', e.target.value)}
+              className="input w-40"
+            >
+              {ENDPOINT_TYPES.map((t) => (
+                <option key={t} value={t}>{ENDPOINT_LABELS[t]}</option>
+              ))}
+            </select>
+            <input
+              type="text"
+              value={ep.base_url}
+              onChange={(e) => updateEndpoint(index, 'base_url', e.target.value)}
+              className="input flex-1"
+              placeholder="https://api.openai.com/v1"
+            />
+            {endpoints.length > 1 && (
+              <Button type="button" variant="ghost" size="icon" onClick={() => removeEndpoint(index)}>
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            )}
           </div>
+        ))}
+      </section>
 
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={onCancel}>
-              取消
-            </Button>
-            <Button type="submit" disabled={submitting}>
-              {submitting ? '保存中...' : channel ? '更新' : '创建'}
+      {/* 模型配置 */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium text-muted-foreground">模型配置</h3>
+          <Button type="button" variant="outline" size="sm" onClick={handleFetchModels} disabled={fetchingModels}>
+            <RefreshCw className={`h-4 w-4 mr-1 ${fetchingModels ? 'animate-spin' : ''}`} />
+            {fetchingModels ? '获取中...' : '获取模型'}
+          </Button>
+        </div>
+
+        {fetchError && (
+          <div className="rounded-lg bg-yellow-50 border border-yellow-200 p-3 text-sm text-yellow-800 dark:bg-yellow-900/20 dark:border-yellow-800 dark:text-yellow-400">
+            获取模型失败：{fetchError}，请手动添加
+          </div>
+        )}
+
+        <div>
+          <label className="block text-sm font-medium mb-1">
+            可用模型 ({models.length})
+          </label>
+          <div className="flex gap-2 mb-2">
+            <input
+              type="text"
+              value={manualModelInput}
+              onChange={(e) => setManualModelInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addManualModel())}
+              className="input flex-1"
+              placeholder="输入模型名称，回车添加"
+            />
+            <Button type="button" variant="outline" size="sm" onClick={addManualModel}>
+              <Plus className="h-4 w-4" />
             </Button>
           </div>
-        </form>
-      </CardContent>
-    </Card>
+          {models.length > 0 && (
+            <div className="max-h-32 overflow-y-auto rounded-lg border bg-muted/30 p-2">
+              <div className="flex flex-wrap gap-1">
+                {models.map((model) => (
+                  <span key={model} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-background text-xs border">
+                    {model}
+                    <button type="button" onClick={() => removeModel(model)} className="hover:text-destructive">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* 高级配置 */}
+      <section className="space-y-3">
+        <h3 className="text-sm font-medium text-muted-foreground">高级配置</h3>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-sm font-medium mb-1">RPM 限制</label>
+            <input type="number" value={rateLimitRpm} onChange={(e) => setRateLimitRpm(e.target.value)} className="input" placeholder="不限" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">TPM 限制</label>
+            <input type="number" value={rateLimitTpm} onChange={(e) => setRateLimitTpm(e.target.value)} className="input" placeholder="不限" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">失败阈值</label>
+            <input type="number" value={failureThreshold} onChange={(e) => setFailureThreshold(e.target.value)} className="input" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">黑名单分钟</label>
+            <input type="number" value={blacklistMinutes} onChange={(e) => setBlacklistMinutes(e.target.value)} className="input" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">并发数</label>
+            <input type="number" value={concurrency} onChange={(e) => setConcurrency(e.target.value)} className="input" />
+          </div>
+        </div>
+      </section>
+
+      {/* 操作按钮 */}
+      <div className="flex justify-end gap-2 pt-2 border-t">
+        <Button type="button" variant="outline" onClick={onCancel}>取消</Button>
+        <Button type="submit" disabled={submitting} className="btn-primary">
+          {submitting ? '保存中...' : channel ? '更新' : '创建'}
+        </Button>
+      </div>
+    </form>
   )
 }

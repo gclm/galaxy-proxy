@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
@@ -7,27 +7,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 use crate::api::{response::generate_id, ApiError, ApiResponse};
-
-/// 负载均衡模式
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum GroupMode {
-    RoundRobin,
-    Random,
-    Failover,
-    Weighted,
-}
-
-impl std::fmt::Display for GroupMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            GroupMode::RoundRobin => write!(f, "round_robin"),
-            GroupMode::Random => write!(f, "random"),
-            GroupMode::Failover => write!(f, "failover"),
-            GroupMode::Weighted => write!(f, "weighted"),
-        }
-    }
-}
+use crate::api::handlers::admin::channels::PaginatedResponse;
 
 /// 分组
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -52,6 +32,17 @@ pub struct GroupItem {
     pub model_name: String,
     pub priority: i32,
     pub weight: i32,
+}
+
+/// 列表查询参数
+#[derive(Debug, Deserialize)]
+pub struct ListGroupsQuery {
+    pub search: Option<String>,
+    pub status: Option<String>,
+    pub sort_by: Option<String>,
+    pub sort_order: Option<String>,
+    pub page: Option<i32>,
+    pub page_size: Option<i32>,
 }
 
 /// 创建分组请求
@@ -101,47 +92,95 @@ pub struct GroupState {
     pub pool: SqlitePool,
 }
 
-/// 获取分组列表
+/// 获取分组列表（支持搜索、筛选、排序、分页）
 pub async fn list(
     State(state): State<GroupState>,
-) -> Result<Json<ApiResponse<Vec<Group>>>, (StatusCode, Json<ApiError>)> {
-    let groups = sqlx::query_as::<_, (String, String, Option<String>, bool, i32, i32, bool, String, String)>(
-        "SELECT id, name, match_regex, retry_enabled, max_retries, first_token_timeout_secs, enabled, created_at, updated_at FROM groups ORDER BY created_at DESC"
-    )
-    .fetch_all(&state.pool)
-    .await
-    .map_err(|e| ApiError::internal_error(e.to_string()))?;
+    Query(query): Query<ListGroupsQuery>,
+) -> Result<Json<ApiResponse<PaginatedResponse<Group>>>, (StatusCode, Json<ApiError>)> {
+    let page = query.page.unwrap_or(1).max(1);
+    let page_size = query.page_size.unwrap_or(20).clamp(1, 100);
+    let offset = (page - 1) * page_size;
 
-    let mut result = Vec::new();
-    for (
-        id,
-        name,
-        match_regex,
-        retry_enabled,
-        max_retries,
-        first_token_timeout_secs,
-        enabled,
-        created_at,
-        updated_at,
-    ) in groups
-    {
-        let items = get_group_items(&state.pool, &id).await?;
+    let order_field = match query.sort_by.as_deref() {
+        Some("name") => "name",
+        _ => "created_at",
+    };
+    let order_dir = match query.sort_order.as_deref() {
+        Some("asc") => "ASC",
+        _ => "DESC",
+    };
 
-        result.push(Group {
+    let mut count_builder = sqlx::QueryBuilder::new("SELECT COUNT(*) FROM groups");
+    let _has_where = push_where(&mut count_builder, &query);
+
+    let count_row = count_builder
+        .build()
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|e| ApiError::internal_error(e.to_string()))?;
+    let total: i64 = sqlx::Row::get(&count_row, 0);
+
+    let mut data_builder = sqlx::QueryBuilder::new(
+        "SELECT id, name, match_regex, retry_enabled, max_retries, first_token_timeout_secs, enabled, created_at, updated_at FROM groups",
+    );
+    push_where(&mut data_builder, &query);
+    data_builder.push(format!(" ORDER BY {} {} ", order_field, order_dir));
+    data_builder.push(" LIMIT ");
+    data_builder.push_bind(page_size);
+    data_builder.push(" OFFSET ");
+    data_builder.push_bind(offset);
+
+    let rows = data_builder
+        .build()
+        .fetch_all(&state.pool)
+        .await
+        .map_err(|e| ApiError::internal_error(e.to_string()))?;
+
+    use sqlx::Row;
+    let mut items_list = Vec::new();
+    for row in &rows {
+        let id: String = row.get("id");
+        let group_items = get_group_items(&state.pool, &id).await?;
+        items_list.push(Group {
             id,
-            name,
-            match_regex,
-            retry_enabled,
-            max_retries,
-            first_token_timeout_secs,
-            enabled,
-            items,
-            created_at,
-            updated_at,
+            name: row.get("name"),
+            match_regex: row.get("match_regex"),
+            retry_enabled: row.get("retry_enabled"),
+            max_retries: row.get("max_retries"),
+            first_token_timeout_secs: row.get("first_token_timeout_secs"),
+            enabled: row.get("enabled"),
+            items: group_items,
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
         });
     }
 
-    Ok(Json(ApiResponse::success(result)))
+    Ok(Json(ApiResponse::success(PaginatedResponse { items: items_list, total })))
+}
+
+fn push_where(builder: &mut sqlx::QueryBuilder<sqlx::Sqlite>, query: &ListGroupsQuery) -> bool {
+    let mut has_where = false;
+
+    if let Some(ref search) = query.search {
+        if !search.is_empty() {
+            builder.push(" WHERE name LIKE ");
+            builder.push_bind(format!("%{}%", search));
+            has_where = true;
+        }
+    }
+    if let Some(ref status) = query.status {
+        let enabled_val = match status.as_str() {
+            "enabled" => Some(true),
+            "disabled" => Some(false),
+            _ => None,
+        };
+        if let Some(v) = enabled_val {
+            builder.push(if has_where { " AND enabled = " } else { " WHERE enabled = " });
+            builder.push_bind(v);
+            has_where = true;
+        }
+    }
+    has_where
 }
 
 /// 创建分组
@@ -149,7 +188,6 @@ pub async fn create(
     State(state): State<GroupState>,
     Json(req): Json<CreateGroupRequest>,
 ) -> Result<(StatusCode, Json<ApiResponse<Group>>), (StatusCode, Json<ApiError>)> {
-    // 验证输入
     if req.name.is_empty() {
         return Err(ApiError::bad_request("分组名称不能为空"));
     }
@@ -159,14 +197,12 @@ pub async fn create(
 
     let group_id = generate_id();
 
-    // 开始事务
     let mut tx = state
         .pool
         .begin()
         .await
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
-    // 插入分组
     sqlx::query(
         r#"
         INSERT INTO groups (id, name, match_regex, retry_enabled, max_retries, first_token_timeout_secs, enabled)
@@ -190,7 +226,6 @@ pub async fn create(
         }
     })?;
 
-    // 插入分组项
     for item in &req.items {
         let item_id = generate_id();
         sqlx::query(
@@ -216,12 +251,10 @@ pub async fn create(
         })?;
     }
 
-    // 提交事务
     tx.commit()
         .await
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
-    // 返回创建的分组
     let group = get_group_by_id(&state.pool, &group_id).await?;
     Ok((StatusCode::CREATED, Json(ApiResponse::success(group))))
 }
@@ -241,7 +274,6 @@ pub async fn update(
     Path(id): Path<String>,
     Json(req): Json<UpdateGroupRequest>,
 ) -> Result<Json<ApiResponse<Group>>, (StatusCode, Json<ApiError>)> {
-    // 检查分组是否存在
     let existing = sqlx::query_scalar::<_, String>("SELECT id FROM groups WHERE id = ?")
         .bind(&id)
         .fetch_optional(&state.pool)
@@ -252,41 +284,45 @@ pub async fn update(
         return Err(ApiError::not_found("分组不存在"));
     }
 
-    // 构建更新语句
-    let mut updates = Vec::new();
-    let mut values: Vec<String> = Vec::new();
+    let mut builder = sqlx::QueryBuilder::new("UPDATE groups SET ");
+    let mut separated = builder.separated(", ");
 
-    if let Some(name) = &req.name {
-        updates.push("name = ?");
-        values.push(name.clone());
+    if let Some(ref name) = req.name {
+        separated.push("name = ");
+        separated.push_bind_unseparated(name);
     }
-    if let Some(match_regex) = &req.match_regex {
-        updates.push("match_regex = ?");
-        values.push(match_regex.clone());
+    if let Some(ref regex) = req.match_regex {
+        separated.push("match_regex = ");
+        separated.push_bind_unseparated(regex);
+    }
+    if let Some(retry_enabled) = req.retry_enabled {
+        separated.push("retry_enabled = ");
+        separated.push_bind_unseparated(retry_enabled);
+    }
+    if let Some(max_retries) = req.max_retries {
+        separated.push("max_retries = ");
+        separated.push_bind_unseparated(max_retries);
+    }
+    if let Some(timeout) = req.first_token_timeout_secs {
+        separated.push("first_token_timeout_secs = ");
+        separated.push_bind_unseparated(timeout);
+    }
+    if let Some(enabled) = req.enabled {
+        separated.push("enabled = ");
+        separated.push_bind_unseparated(enabled);
     }
 
-    if updates.is_empty() {
-        return Err(ApiError::bad_request("没有需要更新的字段"));
-    }
+    separated.push("updated_at = CURRENT_TIMESTAMP");
 
-    updates.push("updated_at = CURRENT_TIMESTAMP");
+    builder.push(" WHERE id = ");
+    builder.push_bind(&id);
 
-    // 构建动态 SQL，手动审计安全性
-    let sql = format!("UPDATE groups SET {} WHERE id = ?", updates.join(", "));
-    let sql: &'static str = Box::leak(sql.into_boxed_str());
-
-    let mut query = sqlx::query(sql);
-    for value in &values {
-        query = query.bind(value);
-    }
-    query = query.bind(&id);
-
-    query
+    builder
+        .build()
         .execute(&state.pool)
         .await
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
-    // 返回更新后的分组
     let group = get_group_by_id(&state.pool, &id).await?;
     Ok(Json(ApiResponse::success(group)))
 }
@@ -315,7 +351,6 @@ pub async fn add_item(
     Path(id): Path<String>,
     Json(req): Json<AddGroupItemRequest>,
 ) -> Result<(StatusCode, Json<ApiResponse<GroupItem>>), (StatusCode, Json<ApiError>)> {
-    // 检查分组是否存在
     let existing = sqlx::query_scalar::<_, String>("SELECT id FROM groups WHERE id = ?")
         .bind(&id)
         .fetch_optional(&state.pool)
@@ -380,7 +415,6 @@ pub async fn delete_item(
     Ok(Json(crate::api::response::success_empty()))
 }
 
-/// 根据 ID 获取分组
 async fn get_group_by_id(
     pool: &SqlitePool,
     id: &str,
@@ -393,17 +427,8 @@ async fn get_group_by_id(
     .await
     .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
-    let (
-        id,
-        name,
-        match_regex,
-        retry_enabled,
-        max_retries,
-        first_token_timeout_secs,
-        enabled,
-        created_at,
-        updated_at,
-    ) = result.ok_or_else(|| ApiError::not_found("分组不存在"))?;
+    let (id, name, match_regex, retry_enabled, max_retries, first_token_timeout_secs, enabled, created_at, updated_at) =
+        result.ok_or_else(|| ApiError::not_found("分组不存在"))?;
 
     let items = get_group_items(pool, &id).await?;
 
@@ -421,7 +446,6 @@ async fn get_group_by_id(
     })
 }
 
-/// 获取分组的所有分组项
 async fn get_group_items(
     pool: &SqlitePool,
     group_id: &str,

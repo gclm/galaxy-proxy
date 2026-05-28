@@ -4,5 +4,7 @@ pub mod channels;
 pub mod fetch_models;
 pub mod groups;
 pub mod pricing;
+pub mod settings;
 pub mod stats;
+pub mod system_info;
 pub mod test_model;

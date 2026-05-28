@@ -23,6 +23,11 @@ pub struct RequestRecord {
     pub latency_ms: Option<i32>,
     pub status_code: Option<i32>,
     pub error_message: Option<String>,
+    pub endpoint_type: Option<String>,
+    pub request_type: String,
+    pub request_content: Option<String>,
+    pub response_content: Option<String>,
+    pub is_stream: bool,
 }
 
 impl StatsRecorder {
@@ -40,8 +45,9 @@ impl StatsRecorder {
                 id, api_key_id, channel_id, group_id,
                 requested_model, actual_model,
                 input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-                cost, latency_ms, status_code, error_message
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                cost, latency_ms, status_code, error_message,
+                endpoint_type, request_type, request_content, response_content, is_stream
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&id)
@@ -58,6 +64,11 @@ impl StatsRecorder {
         .bind(record.latency_ms)
         .bind(record.status_code)
         .bind(&record.error_message)
+        .bind(&record.endpoint_type)
+        .bind(&record.request_type)
+        .bind(&record.request_content)
+        .bind(&record.response_content)
+        .bind(record.is_stream)
         .execute(&self.pool)
         .await?;
 

@@ -150,35 +150,32 @@ pub async fn update(
     }
 
     // 构建更新语句
-    let mut updates = Vec::new();
-    let mut values: Vec<String> = Vec::new();
+    let mut builder = sqlx::QueryBuilder::new("UPDATE api_keys SET ");
+    let mut separated = builder.separated(", ");
+    let mut has_update = false;
 
-    if let Some(name) = &req.name {
-        updates.push("name = ?");
-        values.push(name.clone());
+    if let Some(ref name) = req.name {
+        separated.push("name = ");
+        separated.push_bind_unseparated(name);
+        has_update = true;
     }
-    if let Some(enabled) = &req.enabled {
-        updates.push("enabled = ?");
-        values.push(enabled.to_string());
+    if let Some(enabled) = req.enabled {
+        separated.push("enabled = ");
+        separated.push_bind_unseparated(enabled);
+        has_update = true;
     }
 
-    if updates.is_empty() {
+    if !has_update {
         return Err(ApiError::bad_request("没有需要更新的字段"));
     }
 
-    updates.push("updated_at = CURRENT_TIMESTAMP");
+    separated.push("updated_at = CURRENT_TIMESTAMP");
 
-    // 构建动态 SQL，手动审计安全性
-    let sql = format!("UPDATE api_keys SET {} WHERE id = ?", updates.join(", "));
-    let sql: &'static str = Box::leak(sql.into_boxed_str());
+    builder.push(" WHERE id = ");
+    builder.push_bind(&id);
 
-    let mut query = sqlx::query(sql);
-    for value in &values {
-        query = query.bind(value);
-    }
-    query = query.bind(&id);
-
-    query
+    builder
+        .build()
         .execute(&state.pool)
         .await
         .map_err(|e| ApiError::internal_error(e.to_string()))?;

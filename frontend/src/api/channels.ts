@@ -3,13 +3,24 @@ import type {
   Channel,
   CreateChannelRequest,
   FetchModelsRequest,
+  PaginatedResponse,
   TestModelRequest,
   TestModelResponse,
   UpdateChannelRequest,
 } from './types'
 
+export interface ChannelListParams {
+  search?: string
+  status?: string
+  sort_by?: string
+  sort_order?: string
+  page?: number
+  page_size?: number
+}
+
 export const channelsApi = {
-  list: () => apiClient.get<Channel[]>('/channels'),
+  list: (params?: ChannelListParams) =>
+    apiClient.get<PaginatedResponse<Channel>>('/channels', params as Record<string, string | number | undefined>),
 
   get: (id: string) => apiClient.get<Channel>(`/channels/${id}`),
 

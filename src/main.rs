@@ -82,14 +82,18 @@ async fn main() -> Result<()> {
     info!("Stats aggregator started");
 
     // 创建路由（带排队配置）
+    let addr = config.server_addr();
+    let jwt_secret = config.auth.jwt_secret.clone();
+    let queuing = config.queuing.clone();
     let app = api::create_router(
         database.pool().clone(),
-        config.auth.jwt_secret.clone(),
-        &config.queuing,
+        jwt_secret,
+        &queuing,
+        &addr,
+        config,
     );
 
     // 启动服务器
-    let addr = config.server_addr();
     info!("Starting server on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
