@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useDebouncedValue } from '@/lib/hooks'
 import { formatDate } from '@/lib/utils'
 import { statsApi } from '@/api/stats'
 import type { RequestLog, RequestLogDetail } from '@/api/types'
@@ -97,21 +98,15 @@ export function Logs() {
   const [page, setPage] = useState(1)
   const pageSize = 20
 
-  const [searchModel, setSearchModel] = useState('')
   const [searchModelInput, setSearchModelInput] = useState('')
+  const searchModel = useDebouncedValue(searchModelInput)
   const [status, setStatus] = useState('')
 
   const [detailLog, setDetailLog] = useState<RequestLog | null>(null)
   const [logDetail, setLogDetail] = useState<RequestLogDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setSearchModel(searchModelInput)
-      setPage(1)
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [searchModelInput])
+  useEffect(() => { setPage(1) }, [searchModel])
 
   const fetchLogs = useCallback(async () => {
     setLoading(true)

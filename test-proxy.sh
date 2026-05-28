@@ -231,7 +231,7 @@ fi
 
 # ── 9. OpenAI Responses 流式 ──
 info "9. OpenAI Responses 流式"
-RESP=$(curl -s --max-time 30 "$BASE_URL/v1/responses" \
+curl -s --max-time 30 "$BASE_URL/v1/responses" \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d "{
@@ -239,9 +239,9 @@ RESP=$(curl -s --max-time 30 "$BASE_URL/v1/responses" \
     \"input\": \"从1数到3\",
     \"max_output_tokens\": 200,
     \"stream\": true
-  }" 2>/dev/null || true)
-echo "$RESP" > /tmp/gp_stream.txt
+  }" 2>/dev/null | tee /tmp/gp_stream.txt > /dev/null || true
 CHUNKS=$(grep -c "^data:" /tmp/gp_stream.txt 2>/dev/null || echo 0)
+CHUNKS=$(echo "$CHUNKS" | head -1)
 CONTENT=$(extract_responses_content /tmp/gp_stream.txt)
 if [ "$CHUNKS" -gt 0 ]; then
   echo -e "  ${YELLOW}[内容]${NC} $CONTENT"

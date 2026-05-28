@@ -3,6 +3,9 @@ import { channelsApi, type ChannelListParams } from '@/api/channels'
 import type { Channel, CreateChannelRequest, EndpointType } from '@/api/types'
 import { ENDPOINT_LABELS } from '@/api/types'
 import { Button } from '@/components/ui/button'
+import { StatusBadge } from '@/components/StatusBadge'
+import { ConfirmDeleteDialog } from '@/components/ConfirmDeleteDialog'
+import { useDebouncedValue } from '@/lib/hooks'
 import { ChannelForm } from '@/components/ChannelForm'
 import { TestModelDialog } from '@/components/TestModelDialog'
 import {
@@ -30,7 +33,8 @@ export function Channels() {
   const [loading, setLoading] = useState(true)
 
   // 筛选状态
-  const [search, setSearch] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+  const search = useDebouncedValue(searchInput)
   const [status, setStatus] = useState<string>('')
   const [sortBy, setSortBy] = useState('created_at')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
@@ -44,6 +48,9 @@ export function Channels() {
 
   // 删除确认
   const [deleteId, setDeleteId] = useState<string | null>(null)
+
+  // 搜索变化时重置页码
+  useEffect(() => { setPage(1) }, [search])
 
   const fetchChannels = useCallback(async () => {
     setLoading(true)
@@ -69,16 +76,6 @@ export function Channels() {
   useEffect(() => {
     fetchChannels()
   }, [fetchChannels])
-
-  // 搜索 debounce
-  const [searchInput, setSearchInput] = useState('')
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setSearch(searchInput)
-      setPage(1)
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [searchInput])
 
   const handleCreate = async (data: CreateChannelRequest) => {
     await channelsApi.create(data)
@@ -221,16 +218,7 @@ export function Channels() {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <button
-                          onClick={() => handleToggleEnabled(channel)}
-                          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors cursor-pointer ${
-                            channel.enabled
-                              ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                              : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
-                          }`}
-                        >
-                          {channel.enabled ? '启用' : '禁用'}
-                        </button>
+                        <StatusBadge enabled={channel.enabled} onClick={() => handleToggleEnabled(channel)} />
                       </td>
                       <td className="px-4 py-3 text-center text-muted-foreground">{models.length}</td>
                       <td className="px-4 py-3 text-center text-muted-foreground">{channel.api_keys.length}</td>
@@ -307,18 +295,12 @@ export function Channels() {
       />
 
       {/* 删除确认 Dialog */}
-      <Dialog open={!!deleteId} onOpenChange={(open) => { if (!open) setDeleteId(null) }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>确认删除</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">确定要删除此渠道吗？此操作不可撤销。</p>
-          <div className="flex justify-end gap-2 mt-4">
-            <Button variant="outline" onClick={() => setDeleteId(null)}>取消</Button>
-            <Button variant="destructive" onClick={handleDelete}>删除</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDeleteDialog
+        open={!!deleteId}
+        onOpenChange={(open) => { if (!open) setDeleteId(null) }}
+        message="确定要删除此渠道吗？此操作不可撤销。"
+        onConfirm={handleDelete}
+      />
     </div>
   )
 }

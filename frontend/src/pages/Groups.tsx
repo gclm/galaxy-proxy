@@ -3,6 +3,9 @@ import { groupsApi, type GroupListParams } from '@/api/groups'
 import { channelsApi } from '@/api/channels'
 import type { Channel, Group, CreateGroupRequest } from '@/api/types'
 import { Button } from '@/components/ui/button'
+import { StatusBadge } from '@/components/StatusBadge'
+import { ConfirmDeleteDialog } from '@/components/ConfirmDeleteDialog'
+import { useDebouncedValue } from '@/lib/hooks'
 import { GroupForm } from '@/components/GroupForm'
 import {
   Dialog,
@@ -27,7 +30,8 @@ export function Groups() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
 
-  const [search, setSearch] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+  const search = useDebouncedValue(searchInput)
   const [status, setStatus] = useState<string>('')
   const [sortBy, setSortBy] = useState('created_at')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
@@ -65,18 +69,12 @@ export function Groups() {
     fetchGroups()
   }, [fetchGroups])
 
+  // 搜索变化时重置页码
+  useEffect(() => { setPage(1) }, [search])
+
   useEffect(() => {
     channelsApi.list().then(res => setChannels(res.items)).catch(console.error)
   }, [])
-
-  const [searchInput, setSearchInput] = useState('')
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setSearch(searchInput)
-      setPage(1)
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [searchInput])
 
   const channelMap = useMemo(() => new Map(channels.map(ch => [ch.id, ch])), [channels])
 
@@ -221,16 +219,7 @@ export function Groups() {
                       {group.retry_enabled ? `${group.max_retries} 次` : '关闭'}
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <button
-                        onClick={() => handleToggleEnabled(group)}
-                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors cursor-pointer ${
-                          group.enabled
-                            ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                            : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
-                        }`}
-                      >
-                        {group.enabled ? '启用' : '禁用'}
-                      </button>
+                      <StatusBadge enabled={group.enabled} onClick={() => handleToggleEnabled(group)} />
                     </td>
                     <td className="px-4 py-3 text-muted-foreground text-xs">{formatDate(group.created_at)}</td>
                     <td className="px-4 py-3">
@@ -283,18 +272,12 @@ export function Groups() {
       </Dialog>
 
       {/* 删除确认 Dialog */}
-      <Dialog open={!!deleteId} onOpenChange={(open) => { if (!open) setDeleteId(null) }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>确认删除</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">确定要删除此分组吗？此操作不可撤销。</p>
-          <div className="flex justify-end gap-2 mt-4">
-            <Button variant="outline" onClick={() => setDeleteId(null)}>取消</Button>
-            <Button variant="destructive" onClick={handleDelete}>删除</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDeleteDialog
+        open={!!deleteId}
+        onOpenChange={(open) => { if (!open) setDeleteId(null) }}
+        message="确定要删除此分组吗？此操作不可撤销。"
+        onConfirm={handleDelete}
+      />
     </div>
   )
 }

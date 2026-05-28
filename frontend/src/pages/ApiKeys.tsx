@@ -2,6 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { apiKeysApi } from '@/api'
 import type { ApiKey } from '@/api/types'
 import { Button } from '@/components/ui/button'
+import { StatusBadge } from '@/components/StatusBadge'
+import { ConfirmDeleteDialog } from '@/components/ConfirmDeleteDialog'
+import { useDebouncedValue } from '@/lib/hooks'
 import {
   Dialog,
   DialogContent,
@@ -22,8 +25,8 @@ export function ApiKeys() {
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([])
   const [loading, setLoading] = useState(true)
 
-  const [search, setSearch] = useState('')
   const [searchInput, setSearchInput] = useState('')
+  const search = useDebouncedValue(searchInput)
 
   const [createOpen, setCreateOpen] = useState(false)
   const [newKeyName, setNewKeyName] = useState('')
@@ -32,11 +35,6 @@ export function ApiKeys() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
 
   const [deleteId, setDeleteId] = useState<string | null>(null)
-
-  useEffect(() => {
-    const timer = setTimeout(() => setSearch(searchInput), 300)
-    return () => clearTimeout(timer)
-  }, [searchInput])
 
   const fetchApiKeys = useCallback(async () => {
     setLoading(true)
@@ -175,16 +173,7 @@ export function ApiKeys() {
                     </div>
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <button
-                      onClick={() => handleToggleEnabled(apiKey)}
-                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors cursor-pointer ${
-                        apiKey.enabled
-                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                          : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
-                      }`}
-                    >
-                      {apiKey.enabled ? '启用' : '禁用'}
-                    </button>
+                    <StatusBadge enabled={apiKey.enabled} onClick={() => handleToggleEnabled(apiKey)} />
                   </td>
                   <td className="px-4 py-3 text-muted-foreground text-xs">{formatDate(apiKey.created_at)}</td>
                   <td className="px-4 py-3">
@@ -252,18 +241,12 @@ export function ApiKeys() {
       </Dialog>
 
       {/* 删除确认 Dialog */}
-      <Dialog open={!!deleteId} onOpenChange={(open) => { if (!open) setDeleteId(null) }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>确认删除</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">确定要删除此 API Key 吗？使用该 Key 的应用将无法继续访问。</p>
-          <div className="flex justify-end gap-2 mt-4">
-            <Button variant="outline" onClick={() => setDeleteId(null)}>取消</Button>
-            <Button variant="destructive" onClick={handleDelete}>删除</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDeleteDialog
+        open={!!deleteId}
+        onOpenChange={(open) => { if (!open) setDeleteId(null) }}
+        message="确定要删除此 API Key 吗？使用该 Key 的应用将无法继续访问。"
+        onConfirm={handleDelete}
+      />
     </div>
   )
 }

@@ -604,53 +604,6 @@ pub fn extract_usage(body: &serde_json::Value, endpoint_type: &EndpointType) -> 
     }
 }
 
-/// 记录请求统计
-pub async fn record_stats(
-    state: &ProxyState,
-    api_key_id: Option<&str>,
-    channel_id: &str,
-    requested_model: &str,
-    actual_model: &str,
-    endpoint_type: &EndpointType,
-    response_body: &serde_json::Value,
-    latency_ms: i64,
-    status_code: u16,
-    error_message: Option<String>,
-    is_passthrough: bool,
-    request_content: Option<String>,
-    response_content: Option<String>,
-) {
-    let (input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens) =
-        if (200..400).contains(&status_code) {
-            extract_usage(response_body, endpoint_type)
-        } else {
-            (0, 0, 0, 0)
-        };
-
-    let record = crate::stats::recorder::RequestRecord {
-        api_key_id: api_key_id.map(|s| s.to_string()),
-        channel_id: Some(channel_id.to_string()),
-        group_id: None,
-        requested_model: requested_model.to_string(),
-        actual_model: Some(actual_model.to_string()),
-        input_tokens,
-        output_tokens,
-        cache_read_tokens,
-        cache_creation_tokens,
-        cost: None,
-        latency_ms: Some(latency_ms as i32),
-        status_code: Some(status_code as i32),
-        error_message,
-        endpoint_type: Some(endpoint_type.as_str().to_string()),
-        request_type: if is_passthrough { "passthrough".to_string() } else { "conversion".to_string() },
-        request_content,
-        response_content,
-        is_stream: false,
-    };
-
-    let _ = state.stats_recorder.record_request(record).await;
-}
-
 /// 选择渠道（支持重试排除）
 async fn select_channel_for_proxy(
     state: &ProxyState,
@@ -776,11 +729,35 @@ async fn execute_proxy_request(
 
     let body_value: serde_json::Value = serde_json::from_str(&response_body).unwrap_or_default();
     let request_content = serde_json::to_string(&body).ok();
-    let response_content_for_log = if status.is_success() { Some(response_body.clone()) } else { None };
-    record_stats(state, api_key_id, &prepared.channel_id, &prepared.model, &prepared.target_model,
-        &prepared.upstream_endpoint, &body_value, latency_ms, status.as_u16(),
-        if !status.is_success() { Some(response_body.clone()) } else { None },
-        !prepared.needs_conversion, request_content, response_content_for_log).await;
+    let status_u16 = status.as_u16();
+
+    // 记录统计
+    {
+        let (input_tokens, output_tokens, cache_read, cache_creation) =
+            if (200..400).contains(&status_u16) {
+                extract_usage(&body_value, &prepared.upstream_endpoint)
+            } else {
+                (0, 0, 0, 0)
+            };
+        let record = crate::stats::recorder::RequestRecord {
+            api_key_id: api_key_id.map(|s| s.to_string()),
+            channel_id: Some(prepared.channel_id.clone()),
+            group_id: None,
+            requested_model: prepared.model.clone(),
+            actual_model: Some(prepared.target_model.clone()),
+            input_tokens, output_tokens, cache_read_tokens: cache_read, cache_creation_tokens: cache_creation,
+            cost: None,
+            latency_ms: Some(latency_ms as i32),
+            status_code: Some(status_u16 as i32),
+            error_message: if !status.is_success() { Some(response_body.clone()) } else { None },
+            endpoint_type: Some(prepared.upstream_endpoint.as_str().to_string()),
+            request_type: if prepared.needs_conversion { "conversion".to_string() } else { "passthrough".to_string() },
+            request_content,
+            response_content: if status.is_success() { Some(response_body.clone()) } else { None },
+            is_stream: false,
+        };
+        let _ = state.stats_recorder.record_request(record).await;
+    }
 
     if !status.is_success() {
         return Err(ProxyError::UpstreamError { status, body: response_body });
