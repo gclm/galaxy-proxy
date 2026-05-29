@@ -1,0 +1,21 @@
+[auth]
+jwt_secret = ""
+token_expiry_hours = 24
+
+[database]
+path = "data/galaxy.db"
+
+[logging]
+file = true
+file_path = "logs/galaxy.log"
+format = "compact"
+level = "info"
+
+[server]
+host = "0.0.0.0"
+port = 8080
+
+[pricing]
+cache_path = "data/pricing_cache.json"
+refresh_interval_hours = 24
+providers = ["openai", "anthropic", "deepseek", "google", "zhipuai", "minimax", "xai", "moonshot", "xiaomi", "stepfun"]

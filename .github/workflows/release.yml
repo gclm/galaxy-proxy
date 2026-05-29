@@ -130,6 +130,17 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Prepare binaries
+        run: |
+          mkdir -p dist/linux-amd64 dist/linux-arm64
+          unzip artifacts/galaxy-router-linux-amd64/galaxy-router-linux-amd64.zip -d dist/linux-amd64
+          unzip artifacts/galaxy-router-linux-arm64/galaxy-router-linux-arm64.zip -d dist/linux-arm64
+          chmod +x dist/linux-amd64/galaxy-router dist/linux-arm64/galaxy-router
+
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
