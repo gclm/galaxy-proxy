@@ -119,12 +119,14 @@ pub struct UsageLogRow {
     pub cache_creation_tokens: i32,
     pub cost: Option<f64>,
     pub latency_ms: Option<i32>,
+    pub ttft_ms: Option<i32>,
     pub status_code: Option<i32>,
     pub error_message: Option<String>,
     pub created_at: String,
     pub endpoint_type: Option<String>,
     pub request_type: String,
     pub is_stream: bool,
+    pub attempts: Option<String>,
 }
 
 /// 请求日志详情（含请求/响应内容）
@@ -145,6 +147,7 @@ pub struct UsageLogDetail {
     pub cache_creation_tokens: i32,
     pub cost: Option<f64>,
     pub latency_ms: Option<i32>,
+    pub ttft_ms: Option<i32>,
     pub status_code: Option<i32>,
     pub error_message: Option<String>,
     pub created_at: String,
@@ -153,6 +156,7 @@ pub struct UsageLogDetail {
     pub request_content: Option<String>,
     pub response_content: Option<String>,
     pub is_stream: bool,
+    pub attempts: Option<String>,
 }
 
 /// 分页结果
@@ -386,8 +390,8 @@ impl StatsState {
                       ul.group_id, ul.requested_model, ul.actual_model,
                       ul.input_tokens, ul.output_tokens,
                       ul.cache_read_tokens, ul.cache_creation_tokens,
-                      ul.cost, ul.latency_ms, ul.status_code, ul.error_message, ul.created_at,
-                      ul.endpoint_type, ul.request_type, ul.is_stream
+                      ul.cost, ul.latency_ms, ul.ttft_ms, ul.status_code, ul.error_message, ul.created_at,
+                      ul.endpoint_type, ul.request_type, ul.is_stream, ul.attempts
                FROM usage_logs ul
                LEFT JOIN api_keys ak ON ul.api_key_id = ak.id
                LEFT JOIN channels c ON ul.channel_id = c.id
@@ -428,9 +432,9 @@ impl StatsState {
                       ul.group_id, ul.requested_model, ul.actual_model,
                       ul.input_tokens, ul.output_tokens,
                       ul.cache_read_tokens, ul.cache_creation_tokens,
-                      ul.cost, ul.latency_ms, ul.status_code, ul.error_message, ul.created_at,
+                      ul.cost, ul.latency_ms, ul.ttft_ms, ul.status_code, ul.error_message, ul.created_at,
                       ul.endpoint_type, ul.request_type,
-                      ul.request_content, ul.response_content, ul.is_stream
+                      ul.request_content, ul.response_content, ul.is_stream, ul.attempts
                FROM usage_logs ul
                LEFT JOIN api_keys ak ON ul.api_key_id = ak.id
                LEFT JOIN channels c ON ul.channel_id = c.id

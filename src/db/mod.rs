@@ -231,5 +231,13 @@ fn get_migrations() -> Vec<Migration> {
             name: "replace_model_pricing_with_model_info",
             sql: "DROP TABLE IF EXISTS model_pricing;",
         },
+        Migration {
+            version: 3,
+            name: "add_ttft_and_attempts_to_usage_logs",
+            sql: r#"
+                ALTER TABLE usage_logs ADD COLUMN ttft_ms INTEGER;
+                ALTER TABLE usage_logs ADD COLUMN attempts TEXT;
+            "#,
+        },
     ]
 }
