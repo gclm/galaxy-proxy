@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Channel, CreateChannelRequest, CustomHeader, EndpointConfig, EndpointType } from '@/api/types'
+import type { Channel, CreateChannelRequest, CustomHeader, EndpointConfig, EndpointType, UpstreamApiKey } from '@/api/types'
 import { ENDPOINT_LABELS } from '@/api/types'
 import { channelsApi } from '@/api/channels'
 import { Button } from '@/components/ui/button'
@@ -22,9 +22,11 @@ const ENDPOINT_TYPES: EndpointType[] = [
 
 export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
   const [name, setName] = useState(channel?.name ?? '')
-  const [apiKeys, setApiKeys] = useState<string[]>(channel?.api_keys ?? [''])
+  const [apiKeys, setApiKeys] = useState<UpstreamApiKey[]>(
+    channel?.api_keys?.map(k => typeof k === 'string' ? { key: k, note: '', enabled: true } : { key: k.key, note: k.note ?? '', enabled: k.enabled ?? true }) ?? [{ key: '', note: '', enabled: true }]
+  )
   const [endpoints, setEndpoints] = useState<EndpointConfig[]>(
-    channel?.endpoints ?? [{ type: 'openai_chat', base_url: '' }]
+    channel?.endpoints ?? [{ type: 'openai_chat', base_url: '', enabled: true }]
   )
   const [models, setModels] = useState<string[]>(channel?.models ?? [])
   const [rateLimitRpm, setRateLimitRpm] = useState(channel?.rate_limit_rpm?.toString() ?? '')
@@ -40,8 +42,8 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
   const [manualModelInput, setManualModelInput] = useState('')
 
   const handleFetchModels = async () => {
-    const validEndpoints = endpoints.filter(ep => ep.base_url.trim())
-    const apiKey = apiKeys[0]
+    const validEndpoints = endpoints.filter(ep => ep.base_url.trim() && ep.enabled !== false)
+    const apiKey = apiKeys.find(k => k.key.trim() && k.enabled !== false)?.key
 
     if (validEndpoints.length === 0 || !apiKey) {
       alert('请先填写端点地址和 API Key')
@@ -56,8 +58,8 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
         api_key: apiKey,
       })
       setModels(fetched)
-    } catch (e: any) {
-      setFetchError(e?.message || '获取模型失败')
+    } catch (e: unknown) {
+      setFetchError(e instanceof Error ? e.message : '获取模型失败')
     } finally {
       setFetchingModels(false)
     }
@@ -82,8 +84,8 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
     try {
       const data: CreateChannelRequest = {
         name,
-        api_keys: apiKeys.filter((k) => k.trim()),
-        endpoints: endpoints.filter((ep) => ep.base_url.trim()),
+        api_keys: apiKeys.filter((k) => k.key.trim()).map(k => ({ key: k.key, note: k.note, enabled: k.enabled })),
+        endpoints: endpoints.filter((ep) => ep.base_url.trim()).map(ep => ({ type: ep.type, base_url: ep.base_url, enabled: ep.enabled })),
         models,
         enabled,
         failure_threshold: parseInt(failureThreshold) || 3,
@@ -101,17 +103,17 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
     }
   }
 
-  const addApiKey = () => setApiKeys([...apiKeys, ''])
+  const addApiKey = () => setApiKeys([...apiKeys, { key: '', note: '', enabled: true }])
   const removeApiKey = (index: number) => setApiKeys(apiKeys.filter((_, i) => i !== index))
-  const updateApiKey = (index: number, value: string) => {
+  const updateApiKey = (index: number, field: keyof UpstreamApiKey, value: string | boolean) => {
     const newKeys = [...apiKeys]
-    newKeys[index] = value
+    newKeys[index] = { ...newKeys[index], [field]: value }
     setApiKeys(newKeys)
   }
 
-  const addEndpoint = () => setEndpoints([...endpoints, { type: 'openai_chat', base_url: '' }])
+  const addEndpoint = () => setEndpoints([...endpoints, { type: 'openai_chat', base_url: '', enabled: true }])
   const removeEndpoint = (index: number) => setEndpoints(endpoints.filter((_, i) => i !== index))
-  const updateEndpoint = (index: number, field: keyof EndpointConfig, value: string) => {
+  const updateEndpoint = (index: number, field: keyof EndpointConfig, value: string | boolean) => {
     const newEndpoints = [...endpoints]
     newEndpoints[index] = { ...newEndpoints[index], [field]: value }
     setEndpoints(newEndpoints)
@@ -139,32 +141,6 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
         </label>
       </section>
 
-      {/* API Keys */}
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium text-muted-foreground">上游 API Keys *</h3>
-          <Button type="button" variant="outline" size="sm" onClick={addApiKey}>
-            <Plus className="h-4 w-4 mr-1" /> 添加
-          </Button>
-        </div>
-        {apiKeys.map((key, index) => (
-          <div key={index} className="flex gap-2">
-            <input
-              type="text"
-              value={key}
-              onChange={(e) => updateApiKey(index, e.target.value)}
-              className="input font-mono"
-              placeholder="sk-..."
-            />
-            {apiKeys.length > 1 && (
-              <Button type="button" variant="ghost" size="icon" onClick={() => removeApiKey(index)}>
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            )}
-          </div>
-        ))}
-      </section>
-
       {/* 端点配置 */}
       <section className="space-y-3">
         <div className="flex items-center justify-between">
@@ -174,7 +150,7 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
           </Button>
         </div>
         {endpoints.map((ep, index) => (
-          <div key={index} className="flex gap-2">
+          <div key={index} className="flex gap-2 items-center">
             <select
               value={ep.type}
               onChange={(e) => updateEndpoint(index, 'type', e.target.value)}
@@ -191,11 +167,64 @@ export function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
               className="input flex-1"
               placeholder="https://api.openai.com/v1"
             />
+            <label className="flex items-center gap-1 text-xs text-muted-foreground whitespace-nowrap cursor-pointer">
+              <input
+                type="checkbox"
+                checked={ep.enabled !== false}
+                onChange={(e) => updateEndpoint(index, 'enabled', e.target.checked)}
+                className="rounded"
+              />
+              启用
+            </label>
             {endpoints.length > 1 && (
               <Button type="button" variant="ghost" size="icon" onClick={() => removeEndpoint(index)}>
                 <Trash2 className="h-4 w-4" />
               </Button>
             )}
+          </div>
+        ))}
+      </section>
+
+      {/* API Keys */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium text-muted-foreground">上游 API Keys *</h3>
+          <Button type="button" variant="outline" size="sm" onClick={addApiKey}>
+            <Plus className="h-4 w-4 mr-1" /> 添加
+          </Button>
+        </div>
+        {apiKeys.map((apiKey, index) => (
+          <div key={index} className="space-y-1">
+            <div className="flex gap-2 items-center">
+              <input
+                type="text"
+                value={apiKey.key}
+                onChange={(e) => updateApiKey(index, 'key', e.target.value)}
+                className="input font-mono flex-1"
+                placeholder="sk-..."
+              />
+              <label className="flex items-center gap-1 text-xs text-muted-foreground whitespace-nowrap cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={apiKey.enabled !== false}
+                  onChange={(e) => updateApiKey(index, 'enabled', e.target.checked)}
+                  className="rounded"
+                />
+                启用
+              </label>
+              {apiKeys.length > 1 && (
+                <Button type="button" variant="ghost" size="icon" onClick={() => removeApiKey(index)}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+            <input
+              type="text"
+              value={apiKey.note}
+              onChange={(e) => updateApiKey(index, 'note', e.target.value)}
+              className="input text-xs w-full"
+              placeholder="备注（可选）"
+            />
           </div>
         ))}
       </section>

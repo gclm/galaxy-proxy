@@ -2,7 +2,7 @@ pub mod scheduler;
 pub mod state;
 
 use self::state::LoadBalancerState;
-use crate::api::handlers::admin::channels::{CustomHeader, EndpointConfig, EndpointType};
+use crate::api::handlers::admin::channels::{parse_api_keys, CustomHeader, EndpointConfig, EndpointType, UpstreamApiKey};
 use crate::protocol::inbound::Inbound;
 use crate::protocol::outbound::Outbound;
 use crate::stats::model::ModelRegistry;
@@ -202,7 +202,7 @@ pub struct ProxyState {
 pub struct ChannelInfo {
     pub id: String,
     pub name: String,
-    pub api_keys: Vec<String>,
+    pub api_keys: Vec<UpstreamApiKey>,
     pub endpoints: Vec<EndpointConfig>,
     pub models: Vec<String>,
     pub custom_headers: Vec<CustomHeader>,
@@ -579,7 +579,7 @@ impl ProxyState {
         let (id, name, api_keys_str, endpoints_str, models_str, custom_headers_str) =
             result.ok_or_else(|| ProxyError::ChannelNotFound("渠道不存在或已禁用".to_string()))?;
 
-        let api_keys: Vec<String> = serde_json::from_str(&api_keys_str).unwrap_or_default();
+        let api_keys: Vec<UpstreamApiKey> = parse_api_keys(&api_keys_str);
         let endpoints: Vec<EndpointConfig> =
             serde_json::from_str(&endpoints_str).unwrap_or_default();
         let models = parse_models(&models_str);
@@ -641,7 +641,7 @@ impl ProxyState {
                 continue;
             }
 
-            let api_keys: Vec<String> = serde_json::from_str(&api_keys_str).unwrap_or_default();
+            let api_keys: Vec<UpstreamApiKey> = parse_api_keys(&api_keys_str);
             let endpoints: Vec<EndpointConfig> =
                 serde_json::from_str(&endpoints_str).unwrap_or_default();
 
@@ -655,10 +655,10 @@ impl ProxyState {
             let channel = ChannelInfo {
                 id: id.clone(),
                 name: name.clone(),
-                api_keys: api_keys.clone(),
-                endpoints: endpoints.clone(),
-                models: models.clone(),
-                custom_headers: custom_headers.clone(),
+                api_keys,
+                endpoints,
+                models,
+                custom_headers,
             };
 
             if !endpoint_filter(&channel) {
@@ -678,41 +678,46 @@ impl ProxyState {
         model.to_string()
     }
 
-    /// 选择 API Key（原子计数器轮询）
+    /// 选择 API Key（原子计数器轮询，跳过禁用 Key）
     #[allow(dead_code)]
     pub fn select_api_key(&self, channel: &ChannelInfo) -> String {
-        if channel.api_keys.is_empty() {
+        let enabled_keys = channel.enabled_api_keys();
+        if enabled_keys.is_empty() {
             return String::new();
         }
 
         let idx =
-            self.key_counter.fetch_add(1, Ordering::Relaxed) as usize % channel.api_keys.len();
-        channel.api_keys[idx].clone()
+            self.key_counter.fetch_add(1, Ordering::Relaxed) as usize % enabled_keys.len();
+        enabled_keys[idx].key.clone()
     }
 
-    /// 生成一次请求内的同渠道 Key 尝试序列。
-    ///
-    /// 起点仍由全局 round-robin 决定；同一次请求失败时，按渠道内 Key 顺序继续兜底。
+    /// 生成一次请求内的同渠道 Key 尝试序列（跳过禁用 Key）。
     pub fn api_key_attempts(&self, channel: &ChannelInfo) -> Vec<String> {
-        if channel.api_keys.is_empty() {
+        let enabled_keys = channel.enabled_api_keys();
+        if enabled_keys.is_empty() {
             return vec![String::new()];
         }
 
         let start =
-            self.key_counter.fetch_add(1, Ordering::Relaxed) as usize % channel.api_keys.len();
+            self.key_counter.fetch_add(1, Ordering::Relaxed) as usize % enabled_keys.len();
 
-        (0..channel.api_keys.len())
-            .map(|offset| channel.api_keys[(start + offset) % channel.api_keys.len()].clone())
+        (0..enabled_keys.len())
+            .map(|offset| enabled_keys[(start + offset) % enabled_keys.len()].key.clone())
             .collect()
     }
 }
 
 impl ChannelInfo {
-    /// 查找指定类型的端点
+    /// 获取启用的 API Key 列表
+    fn enabled_api_keys(&self) -> Vec<&UpstreamApiKey> {
+        self.api_keys.iter().filter(|k| k.enabled).collect()
+    }
+
+    /// 查找指定类型的端点（跳过已禁用的）
     pub fn find_endpoint(&self, endpoint_type: &EndpointType) -> Option<EndpointConfig> {
         self.endpoints
             .iter()
-            .find(|e| e.endpoint_type == *endpoint_type)
+            .find(|e| e.enabled && e.endpoint_type == *endpoint_type)
             .cloned()
     }
 }
@@ -867,7 +872,7 @@ async fn prepare_proxy_request(
     reqwest_headers.insert("Content-Type", "application/json".parse().unwrap());
 
     if needs_conversion {
-        get_outbound(&upstream_endpoint).set_auth_header(&mut reqwest_headers, &api_key);
+        get_outbound(&upstream_endpoint).set_auth_header(&mut reqwest_headers, api_key);
     } else {
         match client_endpoint {
             EndpointType::Anthropic => {
@@ -912,6 +917,7 @@ async fn prepare_proxy_request(
 /// 单次尝试的统计信息
 struct AttemptStats {
     channel_id: String,
+    #[allow(dead_code)]
     model: String,
     target_model: String,
     upstream_endpoint: EndpointType,
@@ -927,6 +933,7 @@ struct AttemptStats {
 }
 
 /// 保存单条请求日志（汇总所有尝试）
+#[allow(clippy::too_many_arguments)]
 async fn save_request_record(
     state: &ProxyState,
     api_key_id: Option<&str>,
@@ -988,6 +995,7 @@ async fn save_request_record(
 }
 
 /// 执行单次代理请求
+#[allow(clippy::too_many_arguments)]
 async fn execute_proxy_request(
     state: &ProxyState,
     _api_key_id: Option<&str>,
@@ -1205,6 +1213,7 @@ pub async fn proxy_request(
 }
 
 /// 执行单次流式代理请求
+#[allow(clippy::too_many_arguments)]
 async fn execute_proxy_stream(
     state: &ProxyState,
     api_key_id: Option<&str>,
@@ -1542,7 +1551,7 @@ async fn execute_proxy_stream(
                 channel_attempts.push(crate::stats::recorder::ChannelAttempt {
                     channel_id: sc_model.clone(),
                     channel_name: None,
-                    status: if status_code >= 200 && status_code < 400 { "success".to_string() } else { "failed".to_string() },
+                    status: if (200..400).contains(&status_code) { "success".to_string() } else { "failed".to_string() },
                     duration_ms: latency_ms as i64,
                     error: error_message.clone(),
                 });

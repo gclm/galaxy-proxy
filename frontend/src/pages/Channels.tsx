@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { channelsApi, type ChannelListParams } from '@/api/channels'
 import type { Channel, CreateChannelRequest } from '@/api/types'
 import { ENDPOINT_LABELS } from '@/api/types'
@@ -50,7 +50,13 @@ export function Channels() {
   const [deleteId, setDeleteId] = useState<string | null>(null)
 
   // 搜索变化时重置页码
-  useEffect(() => { setPage(1) }, [search])
+  const prevSearch = useRef(search)
+  useEffect(() => {
+    if (search !== prevSearch.current) {
+      prevSearch.current = search
+      setPage(1)
+    }
+  }, [search])
 
   const fetchChannels = useCallback(async () => {
     setLoading(true)
@@ -74,6 +80,7 @@ export function Channels() {
   }, [search, status, sortBy, sortOrder, page])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchChannels()
   }, [fetchChannels])
 
@@ -211,7 +218,7 @@ export function Channels() {
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-1">
                           {channel.endpoints.map((ep, i) => (
-                            <span key={i} className="inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
+                            <span key={i} className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-medium ${ep.enabled === false ? 'bg-muted text-muted-foreground line-through' : 'bg-primary/10 text-primary'}`}>
                               {ENDPOINT_LABELS[ep.type] || ep.type}
                             </span>
                           ))}
@@ -221,7 +228,9 @@ export function Channels() {
                         <StatusBadge enabled={channel.enabled} onClick={() => handleToggleEnabled(channel)} />
                       </td>
                       <td className="px-4 py-3 text-center text-muted-foreground">{models.length}</td>
-                      <td className="px-4 py-3 text-center text-muted-foreground">{channel.api_keys.length}</td>
+                      <td className="px-4 py-3 text-center text-muted-foreground">
+                        {channel.api_keys.filter(k => k.enabled !== false).length}/{channel.api_keys.length}
+                      </td>
                       <td className="px-4 py-3 text-muted-foreground text-xs">{formatDate(channel.created_at)}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-center gap-1">

@@ -78,6 +78,22 @@ pub struct EndpointConfig {
     #[serde(rename = "type")]
     pub endpoint_type: EndpointType,
     pub base_url: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+/// 上游 API Key
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct UpstreamApiKey {
+    pub key: String,
+    #[serde(default)]
+    pub note: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// 自定义请求头
@@ -92,7 +108,7 @@ pub struct CustomHeader {
 pub struct Channel {
     pub id: String,
     pub name: String,
-    pub api_keys: Vec<String>,
+    pub api_keys: Vec<UpstreamApiKey>,
     pub endpoints: Vec<EndpointConfig>,
     pub models: Vec<String>,
     pub rate_limit_rpm: Option<i32>,
@@ -110,7 +126,7 @@ pub struct Channel {
 #[derive(Debug, Deserialize)]
 pub struct CreateChannelRequest {
     pub name: String,
-    pub api_keys: Vec<String>,
+    pub api_keys: Vec<UpstreamApiKey>,
     pub endpoints: Vec<EndpointConfig>,
     pub models: Option<Vec<String>>,
     pub rate_limit_rpm: Option<i32>,
@@ -126,7 +142,7 @@ pub struct CreateChannelRequest {
 #[derive(Debug, Deserialize)]
 pub struct UpdateChannelRequest {
     pub name: Option<String>,
-    pub api_keys: Option<Vec<String>>,
+    pub api_keys: Option<Vec<UpstreamApiKey>>,
     pub endpoints: Option<Vec<EndpointConfig>>,
     pub models: Option<Vec<String>>,
     pub rate_limit_rpm: Option<i32>,
@@ -428,10 +444,31 @@ async fn get_channel_by_id(
     Ok(row_to_channel(row))
 }
 
+/// 兼容旧格式：api_keys 可能是 ["sk-xxx"] 或 [{"key":"sk-xxx","note":"","enabled":true}]
+pub fn parse_api_keys(json_str: &str) -> Vec<UpstreamApiKey> {
+    let value: serde_json::Value = serde_json::from_str(json_str).unwrap_or_default();
+    let Some(arr) = value.as_array() else {
+        return Vec::new();
+    };
+    arr.iter()
+        .filter_map(|v| {
+            if let Some(s) = v.as_str() {
+                Some(UpstreamApiKey {
+                    key: s.to_string(),
+                    note: String::new(),
+                    enabled: true,
+                })
+            } else {
+                serde_json::from_value(v.clone()).ok()
+            }
+        })
+        .collect()
+}
+
 fn row_to_channel(
     (id, name, api_keys_str, endpoints_str, models_str, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, custom_headers_str, enabled, created_at, updated_at): ChannelRow,
 ) -> Channel {
-    let api_keys: Vec<String> = serde_json::from_str(&api_keys_str).unwrap_or_default();
+    let api_keys = parse_api_keys(&api_keys_str);
     let endpoints: Vec<EndpointConfig> = serde_json::from_str(&endpoints_str).unwrap_or_default();
     let models: Vec<String> = serde_json::from_str(&models_str).unwrap_or_default();
     let custom_headers: Vec<CustomHeader> = serde_json::from_str(&custom_headers_str).unwrap_or_default();
@@ -458,7 +495,7 @@ fn row_to_channel_from_row(row: &sqlx::sqlite::SqliteRow) -> Channel {
     Channel {
         id: row.get("id"),
         name: row.get("name"),
-        api_keys: serde_json::from_str(&row.get::<String, _>("api_keys")).unwrap_or_default(),
+        api_keys: parse_api_keys(&row.get::<String, _>("api_keys")),
         endpoints: serde_json::from_str(&row.get::<String, _>("endpoints")).unwrap_or_default(),
         models: serde_json::from_str(&row.get::<String, _>("models")).unwrap_or_default(),
         rate_limit_rpm: row.get("rate_limit_rpm"),

@@ -46,6 +46,7 @@ export const ENDPOINT_LABELS: Record<EndpointType, string> = {
 export interface EndpointConfig {
   type: EndpointType
   base_url: string
+  enabled?: boolean
 }
 
 export interface CustomHeader {
@@ -53,10 +54,16 @@ export interface CustomHeader {
   value: string
 }
 
+export interface UpstreamApiKey {
+  key: string
+  note?: string
+  enabled?: boolean
+}
+
 export interface Channel {
   id: string
   name: string
-  api_keys: string[]
+  api_keys: UpstreamApiKey[]
   endpoints: EndpointConfig[]
   models: string[]
   rate_limit_rpm: number | null
@@ -72,7 +79,7 @@ export interface Channel {
 
 export interface CreateChannelRequest {
   name: string
-  api_keys: string[]
+  api_keys: UpstreamApiKey[]
   endpoints: EndpointConfig[]
   models?: string[]
   rate_limit_rpm?: number
@@ -86,7 +93,7 @@ export interface CreateChannelRequest {
 
 export interface UpdateChannelRequest {
   name?: string
-  api_keys?: string[]
+  api_keys?: UpstreamApiKey[]
   endpoints?: EndpointConfig[]
   models?: string[]
   rate_limit_rpm?: number
