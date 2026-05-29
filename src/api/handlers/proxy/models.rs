@@ -1,24 +1,20 @@
-use axum::{extract::State, response::IntoResponse, Json};
+use axum::{Json, extract::State, response::IntoResponse};
 use sqlx::SqlitePool;
 
 use crate::api::middleware::ApiKeyAuth;
 
 /// 获取可用模型列表（分组名 + 渠道直接支持的模型）
-pub async fn list(
-    _auth: ApiKeyAuth,
-    State(pool): State<SqlitePool>,
-) -> impl IntoResponse {
+pub async fn list(_auth: ApiKeyAuth, State(pool): State<SqlitePool>) -> impl IntoResponse {
     // 获取所有启用的分组名
     let groups = sqlx::query_scalar::<_, String>("SELECT name FROM groups WHERE enabled = 1")
         .fetch_all(&pool)
         .await;
 
     // 获取渠道直接支持的模型
-    let channel_models = sqlx::query_scalar::<_, String>(
-        "SELECT models FROM channels WHERE enabled = 1",
-    )
-    .fetch_all(&pool)
-    .await;
+    let channel_models =
+        sqlx::query_scalar::<_, String>("SELECT models FROM channels WHERE enabled = 1")
+            .fetch_all(&pool)
+            .await;
 
     let mut model_set = std::collections::HashSet::new();
 

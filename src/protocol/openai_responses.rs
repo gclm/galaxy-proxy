@@ -181,17 +181,18 @@ impl Inbound for OpenAiResponsesInbound {
         if let Some(choice) = event.first_choice() {
             if let Some(content) = &choice.delta.content
                 && let Content::Text(text) = content
-                && !text.is_empty() {
-                    events.push(format!(
-                        "event: response.output_text.delta\ndata: {}\n\n",
-                        serde_json::json!({
-                            "type": "response.output_text.delta",
-                            "output_index": 0,
-                            "content_index": 0,
-                            "delta": text
-                        })
-                    ));
-                }
+                && !text.is_empty()
+            {
+                events.push(format!(
+                    "event: response.output_text.delta\ndata: {}\n\n",
+                    serde_json::json!({
+                        "type": "response.output_text.delta",
+                        "output_index": 0,
+                        "content_index": 0,
+                        "delta": text
+                    })
+                ));
+            }
 
             if choice.finish_reason.is_some() {
                 events.push(format!(
@@ -285,33 +286,34 @@ impl Outbound for OpenAiResponsesOutbound {
         if let Some(output) = response["output"].as_array() {
             for item in output {
                 if item["type"] == "message"
-                    && let Some(content) = item["content"].as_array() {
-                        let text: String = content
-                            .iter()
-                            .filter_map(|c| {
-                                if c["type"] == "output_text" {
-                                    c["text"].as_str()
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
+                    && let Some(content) = item["content"].as_array()
+                {
+                    let text: String = content
+                        .iter()
+                        .filter_map(|c| {
+                            if c["type"] == "output_text" {
+                                c["text"].as_str()
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
 
-                        if !text.is_empty() {
-                            messages.push(Choice {
-                                index: 0,
-                                message: Message {
-                                    role: Role::Assistant,
-                                    content: Some(Content::Text(text)),
-                                    name: None,
-                                    tool_calls: None,
-                                    tool_call_id: None,
-                                    reasoning_content: None,
-                                },
-                                finish_reason: Some(FinishReason::Stop),
-                            });
-                        }
+                    if !text.is_empty() {
+                        messages.push(Choice {
+                            index: 0,
+                            message: Message {
+                                role: Role::Assistant,
+                                content: Some(Content::Text(text)),
+                                name: None,
+                                tool_calls: None,
+                                tool_call_id: None,
+                                reasoning_content: None,
+                            },
+                            finish_reason: Some(FinishReason::Stop),
+                        });
                     }
+                }
             }
         }
 

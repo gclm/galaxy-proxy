@@ -308,7 +308,11 @@ impl StatsState {
     }
 
     /// 按日期范围获取按天统计
-    pub async fn get_daily_stats_by_range(&self, start: &str, end: &str) -> Result<Vec<UsageDaily>, sqlx::Error> {
+    pub async fn get_daily_stats_by_range(
+        &self,
+        start: &str,
+        end: &str,
+    ) -> Result<Vec<UsageDaily>, sqlx::Error> {
         let rows: Vec<UsageDaily> = sqlx::query_as(
             "SELECT id, date, api_key_id, channel_id, group_id, model, request_count, success_count, failure_count, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, total_cost FROM usage_daily WHERE date >= ? AND date <= ? ORDER BY date DESC"
         )
@@ -321,7 +325,11 @@ impl StatsState {
     }
 
     /// 按日期范围获取按模型统计
-    pub async fn get_model_stats_by_range(&self, start: &str, end: &str) -> Result<Vec<ModelStats>, sqlx::Error> {
+    pub async fn get_model_stats_by_range(
+        &self,
+        start: &str,
+        end: &str,
+    ) -> Result<Vec<ModelStats>, sqlx::Error> {
         let stats = sqlx::query_as::<_, (String, i32, i32, i32, f64)>(
             "SELECT model, SUM(request_count), SUM(input_tokens), SUM(output_tokens), SUM(total_cost)
              FROM usage_daily WHERE date >= ? AND date <= ?
@@ -332,13 +340,24 @@ impl StatsState {
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(stats.into_iter().map(|(model, requests, input, output, cost)| ModelStats {
-            model, request_count: requests, input_tokens: input, output_tokens: output, total_cost: cost,
-        }).collect())
+        Ok(stats
+            .into_iter()
+            .map(|(model, requests, input, output, cost)| ModelStats {
+                model,
+                request_count: requests,
+                input_tokens: input,
+                output_tokens: output,
+                total_cost: cost,
+            })
+            .collect())
     }
 
     /// 按日期范围获取按渠道统计
-    pub async fn get_channel_stats_by_range(&self, start: &str, end: &str) -> Result<Vec<ChannelStats>, sqlx::Error> {
+    pub async fn get_channel_stats_by_range(
+        &self,
+        start: &str,
+        end: &str,
+    ) -> Result<Vec<ChannelStats>, sqlx::Error> {
         let rows: Vec<ChannelStatsRow> = sqlx::query_as(
             "SELECT u.channel_id, COALESCE(c.name, 'unknown'),
                     SUM(u.request_count), SUM(u.success_count), SUM(u.failure_count),
@@ -352,15 +371,28 @@ impl StatsState {
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows.into_iter().map(|(id, name, requests, success, failure, input, output, cost)| ChannelStats {
-            channel_id: id, channel_name: name,
-            request_count: requests, success_count: success, failure_count: failure,
-            input_tokens: input, output_tokens: output, total_cost: cost,
-        }).collect())
+        Ok(rows
+            .into_iter()
+            .map(
+                |(id, name, requests, success, failure, input, output, cost)| ChannelStats {
+                    channel_id: id,
+                    channel_name: name,
+                    request_count: requests,
+                    success_count: success,
+                    failure_count: failure,
+                    input_tokens: input,
+                    output_tokens: output,
+                    total_cost: cost,
+                },
+            )
+            .collect())
     }
 
     /// 获取请求日志（分页 + 筛选）
-    pub async fn get_logs(&self, filter: LogsFilter) -> Result<PagedResult<UsageLogRow>, sqlx::Error> {
+    pub async fn get_logs(
+        &self,
+        filter: LogsFilter,
+    ) -> Result<PagedResult<UsageLogRow>, sqlx::Error> {
         use sqlx::QueryBuilder;
 
         let mut count_builder = QueryBuilder::new("SELECT COUNT(*) FROM usage_logs ul WHERE 1=1");
@@ -377,8 +409,12 @@ impl StatsState {
             count_builder.push(kid.clone());
         }
         match filter.status.as_deref() {
-            Some("success") => { count_builder.push(" AND ul.status_code >= 200 AND ul.status_code < 400"); }
-            Some("failure") => { count_builder.push(" AND (ul.status_code < 200 OR ul.status_code >= 400)"); }
+            Some("success") => {
+                count_builder.push(" AND ul.status_code >= 200 AND ul.status_code < 400");
+            }
+            Some("failure") => {
+                count_builder.push(" AND (ul.status_code < 200 OR ul.status_code >= 400)");
+            }
             _ => {}
         }
 
@@ -395,7 +431,7 @@ impl StatsState {
                FROM usage_logs ul
                LEFT JOIN api_keys ak ON ul.api_key_id = ak.id
                LEFT JOIN channels c ON ul.channel_id = c.id
-               WHERE 1=1"#
+               WHERE 1=1"#,
         );
         if let Some(ref model) = filter.model {
             data_builder.push(" AND ul.requested_model LIKE ");
@@ -410,8 +446,12 @@ impl StatsState {
             data_builder.push(kid.clone());
         }
         match filter.status.as_deref() {
-            Some("success") => { data_builder.push(" AND ul.status_code >= 200 AND ul.status_code < 400"); }
-            Some("failure") => { data_builder.push(" AND (ul.status_code < 200 OR ul.status_code >= 400)"); }
+            Some("success") => {
+                data_builder.push(" AND ul.status_code >= 200 AND ul.status_code < 400");
+            }
+            Some("failure") => {
+                data_builder.push(" AND (ul.status_code < 200 OR ul.status_code >= 400)");
+            }
             _ => {}
         }
         data_builder.push(" ORDER BY ul.created_at DESC LIMIT ");
@@ -421,7 +461,10 @@ impl StatsState {
 
         let items: Vec<UsageLogRow> = data_builder.build_query_as().fetch_all(&self.pool).await?;
 
-        Ok(PagedResult { items, total: total.0 })
+        Ok(PagedResult {
+            items,
+            total: total.0,
+        })
     }
 
     /// 获取单条日志详情（含请求/响应内容）

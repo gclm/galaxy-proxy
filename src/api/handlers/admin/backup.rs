@@ -1,13 +1,25 @@
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::Json;
 use serde::{Deserialize, Serialize};
-use sqlx::{SqlitePool, SqliteConnection};
+use sqlx::{SqliteConnection, SqlitePool};
 
 type DbResult<T> = Result<T, (StatusCode, Json<ApiError>)>;
 type ChannelRow = (
-    String, String, String, String, String,
-    Option<i32>, Option<i32>, i32, i32, i32, String, bool, String, String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<i32>,
+    Option<i32>,
+    i32,
+    i32,
+    i32,
+    String,
+    bool,
+    String,
+    String,
 );
 type GroupRow = (String, String, Option<String>, bool, i32, i32, bool);
 
@@ -122,7 +134,10 @@ pub async fn import(
         )));
     }
 
-    let mut tx = state.pool.begin().await
+    let mut tx = state
+        .pool
+        .begin()
+        .await
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
     let mut result = ImportResult::default();
@@ -139,9 +154,7 @@ pub async fn import(
         match import_api_key(&mut tx, key).await {
             Ok(true) => result.api_keys_imported += 1,
             Ok(false) => {}
-            Err(e) => result
-                .errors
-                .push(format!("API Key '{}': {}", key.name, e)),
+            Err(e) => result.errors.push(format!("API Key '{}': {}", key.name, e)),
         }
     }
 
@@ -161,7 +174,8 @@ pub async fn import(
         }
     }
 
-    tx.commit().await
+    tx.commit()
+        .await
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
     Ok(Json(ApiResponse::success(result)))
@@ -233,7 +247,22 @@ async fn fetch_channels(pool: &SqlitePool) -> DbResult<Vec<Channel>> {
     Ok(rows
         .into_iter()
         .map(
-            |(id, name, api_keys, endpoints, models, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, custom_headers, enabled, created_at, updated_at)| {
+            |(
+                id,
+                name,
+                api_keys,
+                endpoints,
+                models,
+                rate_limit_rpm,
+                rate_limit_tpm,
+                failure_threshold,
+                blacklist_minutes,
+                concurrency,
+                custom_headers,
+                enabled,
+                created_at,
+                updated_at,
+            )| {
                 Channel {
                     id,
                     name,
@@ -245,7 +274,8 @@ async fn fetch_channels(pool: &SqlitePool) -> DbResult<Vec<Channel>> {
                     failure_threshold,
                     blacklist_minutes,
                     concurrency,
-                    custom_headers: serde_json::from_str::<Vec<CustomHeader>>(&custom_headers).unwrap_or_default(),
+                    custom_headers: serde_json::from_str::<Vec<CustomHeader>>(&custom_headers)
+                        .unwrap_or_default(),
                     enabled,
                     created_at,
                     updated_at,
@@ -286,25 +316,28 @@ async fn fetch_groups(pool: &SqlitePool) -> DbResult<Vec<GroupExport>> {
             enabled,
             items: items
                 .into_iter()
-                .map(|(model_name, priority, weight, channel_name)| GroupItemExport {
-                    channel_name,
-                    model_name,
-                    priority,
-                    weight,
-                })
+                .map(
+                    |(model_name, priority, weight, channel_name)| GroupItemExport {
+                        channel_name,
+                        model_name,
+                        priority,
+                        weight,
+                    },
+                )
                 .collect(),
         });
     }
     Ok(groups)
 }
 
-async fn fetch_api_keys(pool: &SqlitePool) -> Result<Vec<ApiKeyExport>, (StatusCode, Json<ApiError>)> {
-    let rows: Vec<(String, String, bool)> = sqlx::query_as(
-        "SELECT name, api_key, enabled FROM api_keys ORDER BY created_at",
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| ApiError::internal_error(e.to_string()))?;
+async fn fetch_api_keys(
+    pool: &SqlitePool,
+) -> Result<Vec<ApiKeyExport>, (StatusCode, Json<ApiError>)> {
+    let rows: Vec<(String, String, bool)> =
+        sqlx::query_as("SELECT name, api_key, enabled FROM api_keys ORDER BY created_at")
+            .fetch_all(pool)
+            .await
+            .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
     Ok(rows
         .into_iter()
@@ -316,13 +349,14 @@ async fn fetch_api_keys(pool: &SqlitePool) -> Result<Vec<ApiKeyExport>, (StatusC
         .collect())
 }
 
-async fn fetch_settings(pool: &SqlitePool) -> Result<Vec<SettingExport>, (StatusCode, Json<ApiError>)> {
-    let rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT key, value FROM settings ORDER BY category, key",
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| ApiError::internal_error(e.to_string()))?;
+async fn fetch_settings(
+    pool: &SqlitePool,
+) -> Result<Vec<SettingExport>, (StatusCode, Json<ApiError>)> {
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT key, value FROM settings ORDER BY category, key")
+            .fetch_all(pool)
+            .await
+            .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
     Ok(rows
         .into_iter()
@@ -380,14 +414,13 @@ async fn import_api_key(conn: &mut SqliteConnection, key: &ApiKeyExport) -> Resu
 }
 
 async fn import_setting(conn: &mut SqliteConnection, s: &SettingExport) -> Result<bool, String> {
-    let result = sqlx::query(
-        "UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
-    )
-    .bind(&s.value)
-    .bind(&s.key)
-    .execute(conn)
-    .await
-    .map_err(|e| e.to_string())?;
+    let result =
+        sqlx::query("UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?")
+            .bind(&s.value)
+            .bind(&s.key)
+            .execute(conn)
+            .await
+            .map_err(|e| e.to_string())?;
 
     Ok(result.rows_affected() > 0)
 }

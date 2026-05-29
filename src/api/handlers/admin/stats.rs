@@ -1,7 +1,7 @@
 use axum::{
+    Json,
     extract::{Query, State},
     http::StatusCode,
-    Json,
 };
 use serde::Deserialize;
 
@@ -41,9 +41,7 @@ pub async fn models(
     Query(query): Query<StatsQuery>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, (StatusCode, Json<ApiError>)> {
     let stats = match (&query.start_date, &query.end_date) {
-        (Some(start), Some(end)) => {
-            state.stats.get_model_stats_by_range(start, end).await
-        }
+        (Some(start), Some(end)) => state.stats.get_model_stats_by_range(start, end).await,
         _ => {
             let days = query.days.unwrap_or(30);
             state.stats.get_model_stats(days).await
@@ -60,9 +58,7 @@ pub async fn channels(
     Query(query): Query<StatsQuery>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, (StatusCode, Json<ApiError>)> {
     let stats = match (&query.start_date, &query.end_date) {
-        (Some(start), Some(end)) => {
-            state.stats.get_channel_stats_by_range(start, end).await
-        }
+        (Some(start), Some(end)) => state.stats.get_channel_stats_by_range(start, end).await,
         _ => {
             let days = query.days.unwrap_or(30);
             state.stats.get_channel_stats(days).await
@@ -79,9 +75,7 @@ pub async fn daily(
     Query(query): Query<StatsQuery>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, (StatusCode, Json<ApiError>)> {
     let stats = match (&query.start_date, &query.end_date) {
-        (Some(start), Some(end)) => {
-            state.stats.get_daily_stats_by_range(start, end).await
-        }
+        (Some(start), Some(end)) => state.stats.get_daily_stats_by_range(start, end).await,
         _ => {
             let days = query.days.unwrap_or(30);
             state.stats.get_daily_stats(days).await

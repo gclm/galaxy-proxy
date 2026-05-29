@@ -1,13 +1,13 @@
 use axum::{
+    Json,
     extract::{Path, Query, State},
     http::StatusCode,
-    Json,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-use crate::api::{response::generate_id, ApiError, ApiResponse};
 use crate::api::handlers::admin::channels::PaginatedResponse;
+use crate::api::{ApiError, ApiResponse, response::generate_id};
 
 /// 分组
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -156,18 +156,22 @@ pub async fn list(
         });
     }
 
-    Ok(Json(ApiResponse::success(PaginatedResponse { items: items_list, total })))
+    Ok(Json(ApiResponse::success(PaginatedResponse {
+        items: items_list,
+        total,
+    })))
 }
 
 fn push_where(builder: &mut sqlx::QueryBuilder<sqlx::Sqlite>, query: &ListGroupsQuery) -> bool {
     let mut has_where = false;
 
     if let Some(ref search) = query.search
-        && !search.is_empty() {
-            builder.push(" WHERE name LIKE ");
-            builder.push_bind(format!("%{}%", search));
-            has_where = true;
-        }
+        && !search.is_empty()
+    {
+        builder.push(" WHERE name LIKE ");
+        builder.push_bind(format!("%{}%", search));
+        has_where = true;
+    }
     if let Some(ref status) = query.status {
         let enabled_val = match status.as_str() {
             "enabled" => Some(true),
@@ -175,7 +179,11 @@ fn push_where(builder: &mut sqlx::QueryBuilder<sqlx::Sqlite>, query: &ListGroups
             _ => None,
         };
         if let Some(v) = enabled_val {
-            builder.push(if has_where { " AND enabled = " } else { " WHERE enabled = " });
+            builder.push(if has_where {
+                " AND enabled = "
+            } else {
+                " WHERE enabled = "
+            });
             builder.push_bind(v);
             has_where = true;
         }
@@ -431,8 +439,17 @@ async fn get_group_by_id(
     .await
     .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
-    let (id, name, match_regex, retry_enabled, max_retries, first_token_timeout_secs, enabled, created_at, updated_at) =
-        result.ok_or_else(|| ApiError::not_found("分组不存在"))?;
+    let (
+        id,
+        name,
+        match_regex,
+        retry_enabled,
+        max_retries,
+        first_token_timeout_secs,
+        enabled,
+        created_at,
+        updated_at,
+    ) = result.ok_or_else(|| ApiError::not_found("分组不存在"))?;
 
     let items = get_group_items(pool, &id).await?;
 

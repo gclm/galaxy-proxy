@@ -243,16 +243,17 @@ impl Inbound for AnthropicInbound {
 
         if let Some(choice) = event.first_choice() {
             if let Some(content) = &choice.delta.content
-                && let Content::Text(text) = content {
-                    events.push(format!(
-                        "event: content_block_delta\ndata: {}\n\n",
-                        serde_json::json!({
-                            "type": "content_block_delta",
-                            "index": 0,
-                            "delta": { "type": "text_delta", "text": text }
-                        })
-                    ));
-                }
+                && let Content::Text(text) = content
+            {
+                events.push(format!(
+                    "event: content_block_delta\ndata: {}\n\n",
+                    serde_json::json!({
+                        "type": "content_block_delta",
+                        "index": 0,
+                        "delta": { "type": "text_delta", "text": text }
+                    })
+                ));
+            }
 
             if choice.finish_reason.is_some() {
                 events.push(format!(

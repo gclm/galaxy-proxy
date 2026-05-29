@@ -1,12 +1,12 @@
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
-    Json,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-use crate::api::{response::generate_id, ApiError, ApiResponse};
+use crate::api::{ApiError, ApiResponse, response::generate_id};
 
 /// API Key
 #[derive(Debug, Serialize, Deserialize, Clone)]

@@ -1,4 +1,4 @@
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{Json, extract::State, http::StatusCode};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
@@ -35,7 +35,10 @@ pub struct TestModelState {
 const TEST_PROMPT: &str = "Hello! Please respond with a brief greeting in one sentence.";
 
 /// 测试协议对应的请求体和上游路径
-fn get_test_config(protocol: &EndpointType, model: &str) -> Option<(serde_json::Value, &'static str)> {
+fn get_test_config(
+    protocol: &EndpointType,
+    model: &str,
+) -> Option<(serde_json::Value, &'static str)> {
     match protocol {
         EndpointType::OpenAiChat => Some((
             serde_json::json!({
@@ -116,9 +119,10 @@ fn inject_custom_headers(
     let mut builder = req_builder;
     for header in headers {
         if let Ok(name) = reqwest::header::HeaderName::from_bytes(header.key.as_bytes())
-            && let Ok(value) = header.value.parse::<reqwest::header::HeaderValue>() {
-                builder = builder.header(name, value);
-            }
+            && let Ok(value) = header.value.parse::<reqwest::header::HeaderValue>()
+        {
+            builder = builder.header(name, value);
+        }
     }
     builder
 }
@@ -161,12 +165,19 @@ pub async fn test_model(
         .or_else(|| endpoints.first())
         .ok_or_else(|| ApiError::bad_request("渠道没有可用端点"))?;
 
-    let upstream_api_key = api_keys.first().ok_or_else(|| ApiError::bad_request("渠道没有配置 API Key"))?;
+    let upstream_api_key = api_keys
+        .first()
+        .ok_or_else(|| ApiError::bad_request("渠道没有配置 API Key"))?;
 
-    let url = format!("{}{}", endpoint.base_url.trim_end_matches('/'), upstream_path);
+    let url = format!(
+        "{}{}",
+        endpoint.base_url.trim_end_matches('/'),
+        upstream_path
+    );
     let start = std::time::Instant::now();
 
-    let mut req_builder = state.http_client
+    let mut req_builder = state
+        .http_client
         .post(&url)
         .header("Content-Type", "application/json");
 
@@ -177,17 +188,18 @@ pub async fn test_model(
                 .header("anthropic-version", "2023-06-01");
         }
         _ => {
-            req_builder = req_builder
-                .header("Authorization", format!("Bearer {}", upstream_api_key));
+            req_builder =
+                req_builder.header("Authorization", format!("Bearer {}", upstream_api_key));
         }
     }
 
     req_builder = inject_custom_headers(req_builder, &custom_headers);
 
     if let Some(ua) = &req.user_agent
-        && !ua.is_empty() {
-            req_builder = req_builder.header("User-Agent", ua.as_str());
-        }
+        && !ua.is_empty()
+    {
+        req_builder = req_builder.header("User-Agent", ua.as_str());
+    }
 
     let resp = req_builder
         .json(&body)
@@ -214,9 +226,7 @@ pub async fn test_model(
 
             let resp_body: serde_json::Value = serde_json::from_str(&resp_text).unwrap_or_default();
             if resp_body.get("error").is_some() {
-                let error_msg = resp_body["error"]["message"]
-                    .as_str()
-                    .unwrap_or("未知错误");
+                let error_msg = resp_body["error"]["message"].as_str().unwrap_or("未知错误");
                 return Ok(Json(ApiResponse::success(TestModelResponse {
                     success: false,
                     message: format!("模型返回错误: {}", error_msg),

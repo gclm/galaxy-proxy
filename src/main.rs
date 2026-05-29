@@ -3,7 +3,7 @@ use clap::Parser;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 mod api;
 mod auth;
@@ -80,7 +80,10 @@ async fn main() -> Result<()> {
     let bg_registry = model_registry.clone();
     let bg_providers = providers.clone();
     tokio::spawn(async move {
-        if let Err(e) = bg_registry.fetch_remote_pricing(&cache_path, &bg_providers).await {
+        if let Err(e) = bg_registry
+            .fetch_remote_pricing(&cache_path, &bg_providers)
+            .await
+        {
             tracing::warn!("远程模型信息刷新失败: {}", e);
         }
     });
@@ -137,8 +140,7 @@ fn init_logging(
     log_level: &str,
     logging_config: &config::LoggingConfig,
 ) -> Result<Option<tracing_appender::non_blocking::WorkerGuard>> {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(log_level));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(log_level));
 
     let mut guard = None;
 
@@ -229,12 +231,13 @@ fn ensure_jwt_secret(mut config: AppConfig, config_path: &PathBuf) -> Result<App
         let mut toml_value: toml::Value = toml::from_str(&content)?;
 
         if let Some(auth) = toml_value.get_mut("auth")
-            && let Some(table) = auth.as_table_mut() {
-                table.insert(
-                    "jwt_secret".to_string(),
-                    toml::Value::String(secret.clone()),
-                );
-            }
+            && let Some(table) = auth.as_table_mut()
+        {
+            table.insert(
+                "jwt_secret".to_string(),
+                toml::Value::String(secret.clone()),
+            );
+        }
 
         std::fs::write(config_path, toml::to_string_pretty(&toml_value)?)?;
         config.auth.jwt_secret = secret;
@@ -245,7 +248,9 @@ fn ensure_jwt_secret(mut config: AppConfig, config_path: &PathBuf) -> Result<App
 
 async fn shutdown_signal() {
     let ctrl_c = async {
-        tokio::signal::ctrl_c().await.expect("failed to listen for ctrl+c");
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to listen for ctrl+c");
     };
 
     #[cfg(unix)]

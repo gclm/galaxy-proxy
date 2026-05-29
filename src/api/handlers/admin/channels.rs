@@ -1,17 +1,29 @@
 use axum::{
+    Json,
     extract::{Path, Query, State},
     http::StatusCode,
-    Json,
 };
 
 type ChannelRow = (
-    String, String, String, String, String,
-    Option<i32>, Option<i32>, i32, i32, i32, String, bool, String, String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<i32>,
+    Option<i32>,
+    i32,
+    i32,
+    i32,
+    String,
+    bool,
+    String,
+    String,
 );
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-use crate::api::{response::generate_id, ApiError, ApiResponse};
+use crate::api::{ApiError, ApiResponse, response::generate_id};
 
 /// 列表查询参数
 #[derive(Debug, Deserialize)]
@@ -207,23 +219,24 @@ pub async fn list(
         .await
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
-    let items: Vec<Channel> = rows
-        .iter()
-        .map(row_to_channel_from_row)
-        .collect();
+    let items: Vec<Channel> = rows.iter().map(row_to_channel_from_row).collect();
 
-    Ok(Json(ApiResponse::success(PaginatedResponse { items, total })))
+    Ok(Json(ApiResponse::success(PaginatedResponse {
+        items,
+        total,
+    })))
 }
 
 fn push_where(builder: &mut sqlx::QueryBuilder<sqlx::Sqlite>, query: &ListChannelsQuery) -> bool {
     let mut has_where = false;
 
     if let Some(ref search) = query.search
-        && !search.is_empty() {
-            builder.push(" WHERE name LIKE ");
-            builder.push_bind(format!("%{}%", search));
-            has_where = true;
-        }
+        && !search.is_empty()
+    {
+        builder.push(" WHERE name LIKE ");
+        builder.push_bind(format!("%{}%", search));
+        has_where = true;
+    }
     if let Some(ref status) = query.status {
         let enabled_val = match status.as_str() {
             "enabled" => Some(true),
@@ -231,7 +244,11 @@ fn push_where(builder: &mut sqlx::QueryBuilder<sqlx::Sqlite>, query: &ListChanne
             _ => None,
         };
         if let Some(v) = enabled_val {
-            builder.push(if has_where { " AND enabled = " } else { " WHERE enabled = " });
+            builder.push(if has_where {
+                " AND enabled = "
+            } else {
+                " WHERE enabled = "
+            });
             builder.push_bind(v);
             has_where = true;
         }
@@ -466,12 +483,28 @@ pub fn parse_api_keys(json_str: &str) -> Vec<UpstreamApiKey> {
 }
 
 fn row_to_channel(
-    (id, name, api_keys_str, endpoints_str, models_str, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, custom_headers_str, enabled, created_at, updated_at): ChannelRow,
+    (
+        id,
+        name,
+        api_keys_str,
+        endpoints_str,
+        models_str,
+        rate_limit_rpm,
+        rate_limit_tpm,
+        failure_threshold,
+        blacklist_minutes,
+        concurrency,
+        custom_headers_str,
+        enabled,
+        created_at,
+        updated_at,
+    ): ChannelRow,
 ) -> Channel {
     let api_keys = parse_api_keys(&api_keys_str);
     let endpoints: Vec<EndpointConfig> = serde_json::from_str(&endpoints_str).unwrap_or_default();
     let models: Vec<String> = serde_json::from_str(&models_str).unwrap_or_default();
-    let custom_headers: Vec<CustomHeader> = serde_json::from_str(&custom_headers_str).unwrap_or_default();
+    let custom_headers: Vec<CustomHeader> =
+        serde_json::from_str(&custom_headers_str).unwrap_or_default();
     Channel {
         id,
         name,
@@ -503,7 +536,8 @@ fn row_to_channel_from_row(row: &sqlx::sqlite::SqliteRow) -> Channel {
         failure_threshold: row.get("failure_threshold"),
         blacklist_minutes: row.get("blacklist_minutes"),
         concurrency: row.get("concurrency"),
-        custom_headers: serde_json::from_str(&row.get::<String, _>("custom_headers")).unwrap_or_default(),
+        custom_headers: serde_json::from_str(&row.get::<String, _>("custom_headers"))
+            .unwrap_or_default(),
         enabled: row.get("enabled"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),

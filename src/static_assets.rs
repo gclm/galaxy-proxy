@@ -1,6 +1,6 @@
 use axum::{
     body::Body,
-    http::{header, Request, StatusCode},
+    http::{Request, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use rust_embed::Embed;
@@ -11,7 +11,8 @@ use std::sync::LazyLock;
 pub struct StaticAssets;
 
 static FALLBACK: &str = "index.html";
-static CACHE_IMMUTABLE: LazyLock<String> = LazyLock::new(|| "public, max-age=31536000, immutable".to_string());
+static CACHE_IMMUTABLE: LazyLock<String> =
+    LazyLock::new(|| "public, max-age=31536000, immutable".to_string());
 
 pub async fn serve(req: Request<Body>) -> Response {
     let path = req.uri().path();
@@ -32,13 +33,15 @@ pub async fn serve(req: Request<Body>) -> Response {
     let Some(asset) = asset else {
         // 尝试 fallback 到 index.html
         if file_path != FALLBACK
-            && let Some(index) = StaticAssets::get(FALLBACK) {
-                return (
-                    StatusCode::OK,
-                    [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-                    Body::from(index.data),
-                ).into_response();
-            }
+            && let Some(index) = StaticAssets::get(FALLBACK)
+        {
+            return (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                Body::from(index.data),
+            )
+                .into_response();
+        }
         return (StatusCode::NOT_FOUND, Body::empty()).into_response();
     };
 
@@ -60,5 +63,6 @@ pub async fn serve(req: Request<Body>) -> Response {
             ),
         ],
         Body::from(asset.data),
-    ).into_response()
+    )
+        .into_response()
 }

@@ -201,6 +201,6 @@ Type 类型:
 - **代理统一入口**: 所有代理 handler（chat/responses/messages/embeddings/images）统一调用 `handle_proxy_request`，不各自实现转发逻辑
 - **缓存共享**: `ProxyCache` 被 admin handler（channels、groups）和 proxy 层共享，管理操作后自动失效缓存
 - **模型反向索引**: `ProxyCache.model_index` 维护 model→channel_id 映射，加速模型路由查找
-- **API Key 轮询**: 使用 `AtomicU64` 计数器实现无锁 round-robin；一次请求选中渠道后，先按 round-robin 起点选择一个 key，遇到 401/402/429 或余额不足、无可用资源包、insufficient_quota 等 key / 账号资源错误时，会在同渠道内尝试下一个 key。只有该渠道所有 key 都失败，才排除整个 `channel_id` 转向其他渠道；流式请求一旦已向客户端输出正常内容，后续错误不会触发无感 key 切换。
+- **API Key 轮询**: 使用 `AtomicU64` 计数器实现无锁 round-robin；一次请求选中渠道后，先按 round-robin 起点选择一个 key，遇到 401/402/429 或余额不足、无可用资源包、insufficient_quota 等 key / 账号资源错误时，会在同渠道内尝试下一个 key。只有该渠道所有 key 都失败，才排除整个 `channel_id` 转向其他渠道；流式请求一旦已向客户端输出正常内容，后续错误不会触发无感 key 切换。**端点和 API Key 支持单独禁用**：`ChannelInfo::enabled_api_keys()` 过滤禁用 Key 后再轮询，`find_endpoint()` 跳过禁用端点。
 - **上游错误脱敏**: `sanitize_upstream_error` 截断并提取关键信息，避免泄露上游内部细节
 - **统计聚合对齐整点**: aggregator 使用 wall-clock aligned sleep，而非固定间隔

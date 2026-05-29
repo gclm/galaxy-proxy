@@ -6,7 +6,9 @@ async fn test_config_load() {
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config.toml");
     let mut f = std::fs::File::create(&config_path).unwrap();
-    write!(f, r#"
+    write!(
+        f,
+        r#"
 [server]
 host = "0.0.0.0"
 port = 9090
@@ -28,7 +30,9 @@ file_path = "test/galaxy.log"
 cache_path = "test/pricing_cache.json"
 refresh_interval_hours = 24
 providers = ["openai"]
-"#).unwrap();
+"#
+    )
+    .unwrap();
     drop(f);
 
     let config = galaxy_router::config::AppConfig::load(&config_path).unwrap();

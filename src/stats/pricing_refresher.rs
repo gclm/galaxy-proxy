@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::time::{interval, Duration};
+use tokio::time::{Duration, interval};
 
 use super::model::ModelRegistry;
 
@@ -13,7 +13,12 @@ pub struct PricingRefresher {
 }
 
 impl PricingRefresher {
-    pub fn new(registry: ModelRegistry, cache_path: PathBuf, providers: Vec<String>, refresh_interval_hours: u64) -> Self {
+    pub fn new(
+        registry: ModelRegistry,
+        cache_path: PathBuf,
+        providers: Vec<String>,
+        refresh_interval_hours: u64,
+    ) -> Self {
         Self {
             registry,
             cache_path,
@@ -36,7 +41,11 @@ impl PricingRefresher {
             tick.tick().await;
 
             tracing::info!("开始定时刷新模型信息");
-            if let Err(e) = self.registry.fetch_remote_pricing(&self.cache_path, &self.providers).await {
+            if let Err(e) = self
+                .registry
+                .fetch_remote_pricing(&self.cache_path, &self.providers)
+                .await
+            {
                 tracing::warn!("定时刷新模型信息失败: {}", e);
             } else {
                 let count = self.registry.get_all_models().await.len();

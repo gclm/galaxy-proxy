@@ -2,7 +2,9 @@ pub mod scheduler;
 pub mod state;
 
 use self::state::LoadBalancerState;
-use crate::api::handlers::admin::channels::{parse_api_keys, CustomHeader, EndpointConfig, EndpointType, UpstreamApiKey};
+use crate::api::handlers::admin::channels::{
+    CustomHeader, EndpointConfig, EndpointType, UpstreamApiKey, parse_api_keys,
+};
 use crate::protocol::inbound::Inbound;
 use crate::protocol::outbound::Outbound;
 use crate::stats::model::ModelRegistry;
@@ -686,8 +688,7 @@ impl ProxyState {
             return String::new();
         }
 
-        let idx =
-            self.key_counter.fetch_add(1, Ordering::Relaxed) as usize % enabled_keys.len();
+        let idx = self.key_counter.fetch_add(1, Ordering::Relaxed) as usize % enabled_keys.len();
         enabled_keys[idx].key.clone()
     }
 
@@ -698,11 +699,14 @@ impl ProxyState {
             return vec![String::new()];
         }
 
-        let start =
-            self.key_counter.fetch_add(1, Ordering::Relaxed) as usize % enabled_keys.len();
+        let start = self.key_counter.fetch_add(1, Ordering::Relaxed) as usize % enabled_keys.len();
 
         (0..enabled_keys.len())
-            .map(|offset| enabled_keys[(start + offset) % enabled_keys.len()].key.clone())
+            .map(|offset| {
+                enabled_keys[(start + offset) % enabled_keys.len()]
+                    .key
+                    .clone()
+            })
             .collect()
     }
 }
@@ -1154,10 +1158,16 @@ pub async fn proxy_request(
             {
                 Ok(result) => {
                     save_request_record(
-                        state, api_key_id, &model, request_content.clone(),
+                        state,
+                        api_key_id,
+                        &model,
+                        request_content.clone(),
                         Some(String::from_utf8_lossy(&result.body).to_string()),
-                        &attempts, None, false,
-                    ).await;
+                        &attempts,
+                        None,
+                        false,
+                    )
+                    .await;
                     return Ok(result);
                 }
                 Err(ProxyError::UpstreamError { status, body }) => {
@@ -1191,23 +1201,34 @@ pub async fn proxy_request(
                 }
                 Err(e) => {
                     save_request_record(
-                        state, api_key_id, &model, request_content.clone(),
-                        None, &attempts, None, false,
-                    ).await;
+                        state,
+                        api_key_id,
+                        &model,
+                        request_content.clone(),
+                        None,
+                        &attempts,
+                        None,
+                        false,
+                    )
+                    .await;
                     return Err(e);
                 }
             }
         }
     }
 
-    tracing::error!(
-        "所有重试耗尽, model={}",
-        model
-    );
+    tracing::error!("所有重试耗尽, model={}", model);
     save_request_record(
-        state, api_key_id, &model, request_content,
-        None, &attempts, None, false,
-    ).await;
+        state,
+        api_key_id,
+        &model,
+        request_content,
+        None,
+        &attempts,
+        None,
+        false,
+    )
+    .await;
     Err(last_error
         .unwrap_or_else(|| ProxyError::NoAvailableChannel("所有渠道都不可用".to_string())))
 }
@@ -1340,9 +1361,17 @@ async fn execute_proxy_stream(
     let api_key_id_clone = api_key_id.map(|s| s.to_string());
     let request_content_clone = serde_json::to_string(&body).ok();
 
-    let (stats_tx, stats_rx) = tokio::sync::oneshot::channel::<
-        (i32, i32, i32, i32, Option<f64>, i32, Option<String>, Option<String>, Option<i32>),
-    >();
+    let (stats_tx, stats_rx) = tokio::sync::oneshot::channel::<(
+        i32,
+        i32,
+        i32,
+        i32,
+        Option<f64>,
+        i32,
+        Option<String>,
+        Option<String>,
+        Option<i32>,
+    )>();
 
     // 提前 clone 给 spawn 任务使用（async_stream 会 move 原值）
     let sc_model = model_clone.clone();
@@ -1353,13 +1382,20 @@ async fn execute_proxy_stream(
     let sc_request_content = request_content_clone.clone();
 
     let stats_recorder = state.stats_recorder.clone();
-    let attempts_snapshot: Vec<crate::stats::recorder::ChannelAttempt> = attempts.iter().map(|a| crate::stats::recorder::ChannelAttempt {
-        channel_id: a.channel_id.clone(),
-        channel_name: None,
-        status: if (200..400).contains(&a.status_code) { "success".to_string() } else { "failed".to_string() },
-        duration_ms: a.latency_ms,
-        error: a.error_message.clone(),
-    }).collect();
+    let attempts_snapshot: Vec<crate::stats::recorder::ChannelAttempt> = attempts
+        .iter()
+        .map(|a| crate::stats::recorder::ChannelAttempt {
+            channel_id: a.channel_id.clone(),
+            channel_name: None,
+            status: if (200..400).contains(&a.status_code) {
+                "success".to_string()
+            } else {
+                "failed".to_string()
+            },
+            duration_ms: a.latency_ms,
+            error: a.error_message.clone(),
+        })
+        .collect();
 
     let response_stream = async_stream::stream! {
         let mut stream = std::pin::pin!(upstream_stream);
@@ -1546,12 +1582,26 @@ async fn execute_proxy_stream(
     // 后台任务确保统计写入（即使流被 drop 也能通过 rx 检测到）
     tokio::spawn(async move {
         let result = match stats_rx.await {
-            Ok((status_code, input_tokens, output_tokens, _cache_read, cost, latency_ms, error_message, response_content, ttft_ms)) => {
+            Ok((
+                status_code,
+                input_tokens,
+                output_tokens,
+                _cache_read,
+                cost,
+                latency_ms,
+                error_message,
+                response_content,
+                ttft_ms,
+            )) => {
                 let mut channel_attempts = attempts_snapshot;
                 channel_attempts.push(crate::stats::recorder::ChannelAttempt {
                     channel_id: sc_model.clone(),
                     channel_name: None,
-                    status: if (200..400).contains(&status_code) { "success".to_string() } else { "failed".to_string() },
+                    status: if (200..400).contains(&status_code) {
+                        "success".to_string()
+                    } else {
+                        "failed".to_string()
+                    },
                     duration_ms: latency_ms as i64,
                     error: error_message.clone(),
                 });
@@ -1572,7 +1622,11 @@ async fn execute_proxy_stream(
                     status_code: Some(status_code),
                     error_message,
                     endpoint_type: Some(sc_client_endpoint.as_str().to_string()),
-                    request_type: if sc_needs_conversion { "conversion".to_string() } else { "passthrough".to_string() },
+                    request_type: if sc_needs_conversion {
+                        "conversion".to_string()
+                    } else {
+                        "passthrough".to_string()
+                    },
                     request_content: sc_request_content,
                     response_content,
                     is_stream: true,
@@ -1691,23 +1745,34 @@ pub async fn proxy_stream(
                 }
                 Err(e) => {
                     save_request_record(
-                        state, api_key_id, &model, request_content.clone(),
-                        None, &attempts, None, true,
-                    ).await;
+                        state,
+                        api_key_id,
+                        &model,
+                        request_content.clone(),
+                        None,
+                        &attempts,
+                        None,
+                        true,
+                    )
+                    .await;
                     return Err(e);
                 }
             }
         }
     }
 
-    tracing::error!(
-        "流式重试耗尽, model={}",
-        model
-    );
+    tracing::error!("流式重试耗尽, model={}", model);
     save_request_record(
-        state, api_key_id, &model, request_content,
-        None, &attempts, None, true,
-    ).await;
+        state,
+        api_key_id,
+        &model,
+        request_content,
+        None,
+        &attempts,
+        None,
+        true,
+    )
+    .await;
     Err(last_error
         .unwrap_or_else(|| ProxyError::NoAvailableChannel("所有渠道都不可用".to_string())))
 }

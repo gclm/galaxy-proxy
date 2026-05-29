@@ -5,11 +5,22 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 type ModelInfoRow = (
-    String, String, String,
-    Option<f64>, Option<f64>, Option<f64>, Option<f64>,
-    Option<i64>, Option<i64>,
-    Option<bool>, Option<bool>, Option<bool>, Option<bool>,
-    Option<bool>, Option<bool>, Option<bool>,
+    String,
+    String,
+    String,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<i64>,
+    Option<i64>,
+    Option<bool>,
+    Option<bool>,
+    Option<bool>,
+    Option<bool>,
+    Option<bool>,
+    Option<bool>,
+    Option<bool>,
 );
 
 /// 模型信息（定价 + 元数据）
@@ -105,13 +116,27 @@ impl ModelRegistry {
 
     /// 从 DB 加载到内存
     pub async fn load_from_db(&self) -> Result<(), sqlx::Error> {
-        let rows = sqlx::query_as::<_, (
-            String, String, String,
-            Option<f64>, Option<f64>, Option<f64>, Option<f64>,
-            Option<i64>, Option<i64>,
-            Option<bool>, Option<bool>, Option<bool>, Option<bool>,
-            Option<bool>, Option<bool>, Option<bool>,
-        )>(
+        let rows = sqlx::query_as::<
+            _,
+            (
+                String,
+                String,
+                String,
+                Option<f64>,
+                Option<f64>,
+                Option<f64>,
+                Option<f64>,
+                Option<i64>,
+                Option<i64>,
+                Option<bool>,
+                Option<bool>,
+                Option<bool>,
+                Option<bool>,
+                Option<bool>,
+                Option<bool>,
+                Option<bool>,
+            ),
+        >(
             "SELECT model, provider, mode,
                     input_price, output_price, cache_read_price, cache_creation_price,
                     max_input_tokens, max_output_tokens,
@@ -177,13 +202,17 @@ impl ModelRegistry {
         if let Some(parent) = cache_path.parent() {
             let _ = tokio::fs::create_dir_all(parent).await;
         }
-        let json = serde_json::to_string_pretty(&models)
-            .map_err(|e| format!("序列化失败: {}", e))?;
+        let json =
+            serde_json::to_string_pretty(&models).map_err(|e| format!("序列化失败: {}", e))?;
         tokio::fs::write(cache_path, &json)
             .await
             .map_err(|e| format!("写入缓存失败: {}", e))?;
 
-        tracing::info!("模型信息缓存已更新: {} ({} 条)", cache_path.display(), models.len());
+        tracing::info!(
+            "模型信息缓存已更新: {} ({} 条)",
+            cache_path.display(),
+            models.len()
+        );
 
         // upsert DB
         self.upsert_models_to_db(models.values()).await?;
@@ -266,13 +295,25 @@ impl ModelRegistry {
         let pricing = self.pricing.read().await;
 
         if let Some(info) = pricing.get(model) {
-            return compute_cost(info, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens);
+            return compute_cost(
+                info,
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                cache_creation_tokens,
+            );
         }
 
         // 模糊匹配
         for (key, info) in pricing.iter() {
             if key == model || key.ends_with(&format!("/{}", model)) {
-                return compute_cost(info, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens);
+                return compute_cost(
+                    info,
+                    input_tokens,
+                    output_tokens,
+                    cache_read_tokens,
+                    cache_creation_tokens,
+                );
             }
         }
 
@@ -395,26 +436,51 @@ fn flatten_and_filter(
         }
     }
 
-    tracing::info!("过滤后 {} 条模型 (providers: {:?})", result.len(), providers);
+    tracing::info!(
+        "过滤后 {} 条模型 (providers: {:?})",
+        result.len(),
+        providers
+    );
     result
 }
 
 fn row_to_info(
-    (model, provider, mode,
-     input_price, output_price, cache_read_price, cache_creation_price,
-     max_input_tokens, max_output_tokens,
-     supports_function_calling, supports_reasoning, supports_vision,
-     supports_pdf_input, supports_prompt_caching,
-     supports_system_messages, supports_tool_choice,
+    (
+        model,
+        provider,
+        mode,
+        input_price,
+        output_price,
+        cache_read_price,
+        cache_creation_price,
+        max_input_tokens,
+        max_output_tokens,
+        supports_function_calling,
+        supports_reasoning,
+        supports_vision,
+        supports_pdf_input,
+        supports_prompt_caching,
+        supports_system_messages,
+        supports_tool_choice,
     ): ModelInfoRow,
 ) -> ModelInfo {
     ModelInfo {
-        model, provider, mode,
-        input_price, output_price, cache_read_price, cache_creation_price,
-        max_input_tokens, max_output_tokens,
-        supports_function_calling, supports_reasoning, supports_vision,
-        supports_pdf_input, supports_prompt_caching,
-        supports_system_messages, supports_tool_choice,
+        model,
+        provider,
+        mode,
+        input_price,
+        output_price,
+        cache_read_price,
+        cache_creation_price,
+        max_input_tokens,
+        max_output_tokens,
+        supports_function_calling,
+        supports_reasoning,
+        supports_vision,
+        supports_pdf_input,
+        supports_prompt_caching,
+        supports_system_messages,
+        supports_tool_choice,
     }
 }
 
@@ -425,16 +491,20 @@ fn compute_cost(
     cache_read_tokens: i32,
     cache_creation_tokens: i32,
 ) -> f64 {
-    let input_cost = info.input_price
+    let input_cost = info
+        .input_price
         .map(|p| (input_tokens as f64 / 1_000_000.0) * p)
         .unwrap_or(0.0);
-    let output_cost = info.output_price
+    let output_cost = info
+        .output_price
         .map(|p| (output_tokens as f64 / 1_000_000.0) * p)
         .unwrap_or(0.0);
-    let cache_read_cost = info.cache_read_price
+    let cache_read_cost = info
+        .cache_read_price
         .map(|p| (cache_read_tokens as f64 / 1_000_000.0) * p)
         .unwrap_or(0.0);
-    let cache_creation_cost = info.cache_creation_price
+    let cache_creation_cost = info
+        .cache_creation_price
         .map(|p| (cache_creation_tokens as f64 / 1_000_000.0) * p)
         .unwrap_or(0.0);
 

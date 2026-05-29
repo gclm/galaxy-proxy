@@ -3,16 +3,16 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use axum::{
+    RequestPartsExt,
     body::Body,
     extract::FromRequestParts,
-    http::{request::Parts, Request, StatusCode},
+    http::{Request, StatusCode, request::Parts},
     middleware::Next,
     response::IntoResponse,
-    RequestPartsExt,
 };
 use axum_extra::{
-    headers::{authorization::Bearer, Authorization},
     TypedHeader,
+    headers::{Authorization, authorization::Bearer},
 };
 use sqlx::SqlitePool;
 
@@ -47,7 +47,9 @@ impl ApiKeyCache {
     /// 获取缓存的 API Key
     async fn get(&self, key: &str) -> Option<(String, String, bool)> {
         let cache = self.keys.read().await;
-        cache.get(key).map(|e| (e.id.clone(), e.name.clone(), e.enabled))
+        cache
+            .get(key)
+            .map(|e| (e.id.clone(), e.name.clone(), e.enabled))
     }
 
     /// 设置 API Key 缓存
@@ -55,9 +57,10 @@ impl ApiKeyCache {
         let mut cache = self.keys.write().await;
         // 限制缓存大小
         if cache.len() >= 1000
-            && let Some(oldest_key) = cache.keys().next().cloned() {
-                cache.remove(&oldest_key);
-            }
+            && let Some(oldest_key) = cache.keys().next().cloned()
+        {
+            cache.remove(&oldest_key);
+        }
         cache.insert(key, ApiKeyEntry { id, name, enabled });
     }
 
@@ -82,10 +85,7 @@ pub struct AuthClaims(pub crate::auth::Claims);
 impl<S: Send + Sync> FromRequestParts<S> for AuthClaims {
     type Rejection = (StatusCode, String);
 
-    async fn from_request_parts(
-        parts: &mut Parts,
-        _state: &S,
-    ) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         // 提取 Authorization header
         let TypedHeader(Authorization(bearer)) = parts
             .extract::<TypedHeader<Authorization<Bearer>>>()
@@ -117,15 +117,9 @@ pub struct ApiKeyAuth {
 impl<S: Send + Sync> FromRequestParts<S> for ApiKeyAuth {
     type Rejection = (StatusCode, axum::Json<serde_json::Value>);
 
-    async fn from_request_parts(
-        parts: &mut Parts,
-        _state: &S,
-    ) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         // 优先从 Authorization: Bearer 提取，回退到 x-api-key（Anthropic 兼容）
-        let api_key = match parts
-            .extract::<TypedHeader<Authorization<Bearer>>>()
-            .await
-        {
+        let api_key = match parts.extract::<TypedHeader<Authorization<Bearer>>>().await {
             Ok(TypedHeader(Authorization(bearer))) => bearer.token().to_string(),
             Err(_) => parts
                 .headers
@@ -146,17 +140,21 @@ impl<S: Send + Sync> FromRequestParts<S> for ApiKeyAuth {
 
         // 1. 检查缓存
         if let Some(cache) = parts.extensions.get::<ApiKeyCache>()
-            && let Some((id, name, enabled)) = cache.get(&api_key).await {
-                if !enabled {
-                    return Err((
-                        StatusCode::FORBIDDEN,
-                        axum::Json(serde_json::json!({
-                            "error": { "message": "API Key 已禁用", "type": "authentication_error" }
-                        })),
-                    ));
-                }
-                return Ok(ApiKeyAuth { key_id: id, key_name: name });
+            && let Some((id, name, enabled)) = cache.get(&api_key).await
+        {
+            if !enabled {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    axum::Json(serde_json::json!({
+                        "error": { "message": "API Key 已禁用", "type": "authentication_error" }
+                    })),
+                ));
             }
+            return Ok(ApiKeyAuth {
+                key_id: id,
+                key_name: name,
+            });
+        }
 
         // 2. 缓存未命中，查询数据库
         let pool = parts.extensions.get::<SqlitePool>().ok_or_else(|| {
@@ -196,7 +194,10 @@ impl<S: Send + Sync> FromRequestParts<S> for ApiKeyAuth {
                         })),
                     ));
                 }
-                Ok(ApiKeyAuth { key_id: id, key_name: name })
+                Ok(ApiKeyAuth {
+                    key_id: id,
+                    key_name: name,
+                })
             }
             None => Err((
                 StatusCode::UNAUTHORIZED,
@@ -213,27 +214,36 @@ pub async fn require_admin_auth(
     request: Request<Body>,
     next: Next,
 ) -> Result<axum::response::Response, axum::response::Response> {
-    let jwt_secret = request.extensions().get::<String>().cloned()
+    let jwt_secret = request
+        .extensions()
+        .get::<String>()
+        .cloned()
         .ok_or_else(|| {
-            (StatusCode::INTERNAL_SERVER_ERROR,
-             axum::Json(serde_json::json!({"code": 500, "message": "JWT 配置缺失"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(serde_json::json!({"code": 500, "message": "JWT 配置缺失"})),
+            )
                 .into_response()
         })?;
 
-    let token = request.headers()
+    let token = request
+        .headers()
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .ok_or_else(|| {
-            (StatusCode::UNAUTHORIZED,
-             axum::Json(serde_json::json!({"code": 401, "message": "缺少认证令牌"})))
+            (
+                StatusCode::UNAUTHORIZED,
+                axum::Json(serde_json::json!({"code": 401, "message": "缺少认证令牌"})),
+            )
                 .into_response()
         })?;
 
-    decode_jwt(token, &jwt_secret)
-    .map_err(|_| {
-        (StatusCode::UNAUTHORIZED,
-         axum::Json(serde_json::json!({"code": 401, "message": "无效的认证令牌"})))
+    decode_jwt(token, &jwt_secret).map_err(|_| {
+        (
+            StatusCode::UNAUTHORIZED,
+            axum::Json(serde_json::json!({"code": 401, "message": "无效的认证令牌"})),
+        )
             .into_response()
     })?;
 

@@ -1,12 +1,12 @@
 use axum::{
+    Json, Router,
     body::Body,
     extract::DefaultBodyLimit,
     http::Request,
     middleware,
     routing::{delete, get, post, put},
-    Json, Router,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sqlx::SqlitePool;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
@@ -57,9 +57,7 @@ pub async fn create_router(
         cache: shared_cache.clone(),
     };
 
-    let api_key_state = ApiKeyState {
-        pool: pool.clone(),
-    };
+    let api_key_state = ApiKeyState { pool: pool.clone() };
 
     let stats_state = StatsApiState {
         stats: StatsState::new(pool.clone()),
@@ -97,62 +95,110 @@ pub async fn create_router(
     let backup_state = BackupState { pool: pool.clone() };
 
     let proxy_state = if queuing.enabled {
-        ProxyState::new(pool.clone(), model_registry.clone()).await.with_queue(queuing.max_queue_size, queuing.queue_timeout_secs)
+        ProxyState::new(pool.clone(), model_registry.clone())
+            .await
+            .with_queue(queuing.max_queue_size, queuing.queue_timeout_secs)
     } else {
         ProxyState::new(pool.clone(), model_registry.clone()).await
     };
 
     // 需要认证的管理路由（每个 nest 独立管理状态）
     let protected_admin = Router::new()
-        .nest("/auth", Router::new()
-            .route("/me", get(auth::me))
-            .route("/password", put(auth::change_password))
-            .with_state(auth_state))
-        .nest("/channels", Router::new()
-            .route("/", get(channels::list).post(channels::create))
-            .route("/{id}", get(channels::get).put(channels::update).delete(channels::delete))
-            .with_state(channel_state))
-        .nest("/groups", Router::new()
-            .route("/", get(groups::list).post(groups::create))
-            .route("/{id}", get(groups::get).put(groups::update).delete(groups::delete))
-            .route("/{id}/items", post(groups::add_item))
-            .route("/{id}/items/{item_id}", delete(groups::delete_item))
-            .with_state(group_state))
-        .nest("/api-keys", Router::new()
-            .route("/", get(api_keys::list).post(api_keys::create))
-            .route("/{id}", get(api_keys::get).put(api_keys::update).delete(api_keys::delete))
-            .with_state(api_key_state))
-        .nest("/stats", Router::new()
-            .route("/overview", get(stats::overview))
-            .route("/models", get(stats::models))
-            .route("/channels", get(stats::channels))
-            .route("/daily", get(stats::daily))
-            .route("/logs", get(stats::logs))
-            .route("/logs/{id}", get(stats::log_detail))
-            .with_state(stats_state))
-        .nest("/models/info", Router::new()
-            .route("/", get(model_info::list).put(model_info::update))
-            .route("/{model}", get(model_info::get))
-            .with_state(model_info_state))
-        .nest("/system-info", Router::new()
-            .route("/", get(system_info::get))
-            .with_state(system_info_state))
-        .nest("/settings", Router::new()
-            .route("/", get(settings::list))
-            .route("/infra", get(settings::infra))
-            .route("/{key}", put(settings::update))
-            .with_state(settings_state))
-        .nest("/backup", Router::new()
-            .route("/export", get(backup::export))
-            .route("/import", post(backup::import))
-            .route("/reset", post(backup::reset))
-            .with_state(backup_state))
-        .nest("/fetch-models", Router::new()
-            .route("/", post(fetch_models::fetch_models))
-            .with_state(fetch_models_state))
-        .nest("/test-model", Router::new()
-            .route("/", post(test_model::test_model))
-            .with_state(test_model_state))
+        .nest(
+            "/auth",
+            Router::new()
+                .route("/me", get(auth::me))
+                .route("/password", put(auth::change_password))
+                .with_state(auth_state),
+        )
+        .nest(
+            "/channels",
+            Router::new()
+                .route("/", get(channels::list).post(channels::create))
+                .route(
+                    "/{id}",
+                    get(channels::get)
+                        .put(channels::update)
+                        .delete(channels::delete),
+                )
+                .with_state(channel_state),
+        )
+        .nest(
+            "/groups",
+            Router::new()
+                .route("/", get(groups::list).post(groups::create))
+                .route(
+                    "/{id}",
+                    get(groups::get).put(groups::update).delete(groups::delete),
+                )
+                .route("/{id}/items", post(groups::add_item))
+                .route("/{id}/items/{item_id}", delete(groups::delete_item))
+                .with_state(group_state),
+        )
+        .nest(
+            "/api-keys",
+            Router::new()
+                .route("/", get(api_keys::list).post(api_keys::create))
+                .route(
+                    "/{id}",
+                    get(api_keys::get)
+                        .put(api_keys::update)
+                        .delete(api_keys::delete),
+                )
+                .with_state(api_key_state),
+        )
+        .nest(
+            "/stats",
+            Router::new()
+                .route("/overview", get(stats::overview))
+                .route("/models", get(stats::models))
+                .route("/channels", get(stats::channels))
+                .route("/daily", get(stats::daily))
+                .route("/logs", get(stats::logs))
+                .route("/logs/{id}", get(stats::log_detail))
+                .with_state(stats_state),
+        )
+        .nest(
+            "/models/info",
+            Router::new()
+                .route("/", get(model_info::list).put(model_info::update))
+                .route("/{model}", get(model_info::get))
+                .with_state(model_info_state),
+        )
+        .nest(
+            "/system-info",
+            Router::new()
+                .route("/", get(system_info::get))
+                .with_state(system_info_state),
+        )
+        .nest(
+            "/settings",
+            Router::new()
+                .route("/", get(settings::list))
+                .route("/infra", get(settings::infra))
+                .route("/{key}", put(settings::update))
+                .with_state(settings_state),
+        )
+        .nest(
+            "/backup",
+            Router::new()
+                .route("/export", get(backup::export))
+                .route("/import", post(backup::import))
+                .route("/reset", post(backup::reset))
+                .with_state(backup_state),
+        )
+        .nest(
+            "/fetch-models",
+            Router::new()
+                .route("/", post(fetch_models::fetch_models))
+                .with_state(fetch_models_state),
+        )
+        .nest(
+            "/test-model",
+            Router::new()
+                .route("/", post(test_model::test_model))
+                .with_state(test_model_state),
+        )
         .layer(middleware::from_fn(require_admin_auth));
 
     Router::new()
@@ -163,13 +209,19 @@ pub async fn create_router(
         // 代理 API 路由
         .nest("/v1", proxy_routes(proxy_state, pool.clone()))
         // 初始化接口（无需认证）
-        .nest("/api/v1/init", Router::new()
-            .route("/", post(auth::init))
-            .with_state(auth_state_for_public.clone()))
+        .nest(
+            "/api/v1/init",
+            Router::new()
+                .route("/", post(auth::init))
+                .with_state(auth_state_for_public.clone()),
+        )
         // 登录接口（无需认证）
-        .nest("/api/v1/admin/auth", Router::new()
-            .route("/login", post(auth::login))
-            .with_state(auth_state_for_public))
+        .nest(
+            "/api/v1/admin/auth",
+            Router::new()
+                .route("/login", post(auth::login))
+                .with_state(auth_state_for_public),
+        )
         // 需要认证的管理 API
         .nest("/api/v1/admin", protected_admin)
         // 静态文件服务（SPA fallback）
@@ -192,9 +244,7 @@ pub async fn create_router(
 }
 
 /// 健康检查端点（返回初始化状态）
-async fn health_check(
-    axum::Extension(pool): axum::Extension<SqlitePool>,
-) -> Json<Value> {
+async fn health_check(axum::Extension(pool): axum::Extension<SqlitePool>) -> Json<Value> {
     let needs_setup = sqlx::query_scalar::<_, i32>("SELECT COUNT(*) FROM users")
         .fetch_one(&pool)
         .await
@@ -224,13 +274,15 @@ fn proxy_routes(proxy_state: ProxyState, pool: SqlitePool) -> Router {
         .with_state(proxy_state)
         .route("/models", get(models::list))
         .with_state(pool)
-        .layer(middleware::from_fn(move |mut req: Request<Body>, next: middleware::Next| {
-            let pool = pool_clone.clone();
-            let cache = api_key_cache.clone();
-            async move {
-                req.extensions_mut().insert(pool);
-                req.extensions_mut().insert(cache);
-                next.run(req).await
-            }
-        }))
+        .layer(middleware::from_fn(
+            move |mut req: Request<Body>, next: middleware::Next| {
+                let pool = pool_clone.clone();
+                let cache = api_key_cache.clone();
+                async move {
+                    req.extensions_mut().insert(pool);
+                    req.extensions_mut().insert(cache);
+                    next.run(req).await
+                }
+            },
+        ))
 }

@@ -4,9 +4,7 @@ use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use std::path::Path;
 use tracing::info;
 
-use crate::config::{
-    RuntimeConfig, SchedulerConfig, ScoreWeights, StickySessionConfig,
-};
+use crate::config::{RuntimeConfig, SchedulerConfig, ScoreWeights, StickySessionConfig};
 
 /// 设置项（数据库行）
 #[derive(Debug, sqlx::FromRow)]
@@ -39,9 +37,10 @@ impl Database {
     pub async fn new(database_url: &str) -> Result<Self> {
         // 确保数据目录存在
         if let Some(path) = database_url.strip_prefix("sqlite:")
-            && let Some(parent) = Path::new(path).parent() {
-                std::fs::create_dir_all(parent)?;
-            }
+            && let Some(parent) = Path::new(path).parent()
+        {
+            std::fs::create_dir_all(parent)?;
+        }
 
         // 对于文件数据库，使用 sqlite:{path} 格式
         let pool = SqlitePoolOptions::new()

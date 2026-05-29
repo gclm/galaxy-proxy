@@ -1,9 +1,4 @@
-use axum::{
-    extract::State,
-    http::HeaderMap,
-    response::IntoResponse,
-    Json,
-};
+use axum::{Json, extract::State, http::HeaderMap, response::IntoResponse};
 use serde_json::Value;
 
 use crate::api::handlers::admin::channels::EndpointType;
@@ -24,5 +19,6 @@ pub async fn proxy(
         body,
         &EndpointType::OpenAiImages,
         &proxy::ErrorFormat::OpenAi,
-    ).await
+    )
+    .await
 }

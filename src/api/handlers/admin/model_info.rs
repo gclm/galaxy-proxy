@@ -1,7 +1,7 @@
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
-    Json,
 };
 use serde::Deserialize;
 
@@ -90,12 +90,18 @@ pub async fn update(
         cache_creation_price: req.cache_creation_price.or(existing.cache_creation_price),
         max_input_tokens: req.max_input_tokens.or(existing.max_input_tokens),
         max_output_tokens: req.max_output_tokens.or(existing.max_output_tokens),
-        supports_function_calling: req.supports_function_calling.or(existing.supports_function_calling),
+        supports_function_calling: req
+            .supports_function_calling
+            .or(existing.supports_function_calling),
         supports_reasoning: req.supports_reasoning.or(existing.supports_reasoning),
         supports_vision: req.supports_vision.or(existing.supports_vision),
         supports_pdf_input: req.supports_pdf_input.or(existing.supports_pdf_input),
-        supports_prompt_caching: req.supports_prompt_caching.or(existing.supports_prompt_caching),
-        supports_system_messages: req.supports_system_messages.or(existing.supports_system_messages),
+        supports_prompt_caching: req
+            .supports_prompt_caching
+            .or(existing.supports_prompt_caching),
+        supports_system_messages: req
+            .supports_system_messages
+            .or(existing.supports_system_messages),
         supports_tool_choice: req.supports_tool_choice.or(existing.supports_tool_choice),
     };
 
