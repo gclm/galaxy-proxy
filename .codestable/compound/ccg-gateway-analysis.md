@@ -73,7 +73,7 @@ pub fn detect_cli_type(headers: &HeaderMap) -> CliType {
 
 ## 关键差异
 
-| 维度 | CCG Gateway | Galaxy Proxy |
+| 维度 | CCG Gateway | Galaxy Router |
 |------|-------------|--------------|
 | 协议转换 | 不做，透明代理 | 需要实现 |
 | 配置方式 | DB + GUI | TOML 文件 |

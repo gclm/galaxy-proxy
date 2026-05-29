@@ -3,7 +3,7 @@ use std::path::PathBuf;
 #[tokio::test]
 async fn test_config_load() {
     let config_path = PathBuf::from("config.toml");
-    let config = galaxy_proxy::config::AppConfig::load(&config_path).unwrap();
+    let config = galaxy_router::config::AppConfig::load(&config_path).unwrap();
 
     assert_eq!(config.server.host, "127.0.0.1");
     assert_eq!(config.server.port, 8080);
@@ -19,7 +19,7 @@ async fn test_database_init() {
     let _ = std::fs::remove_dir_all("/tmp/galaxy_test");
     std::fs::create_dir_all("/tmp/galaxy_test").unwrap();
 
-    let db = galaxy_proxy::db::Database::new(&db_url).await.unwrap();
+    let db = galaxy_router::db::Database::new(&db_url).await.unwrap();
 
     let tables: Vec<String> =
         sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
@@ -42,15 +42,15 @@ async fn test_database_init() {
 #[test]
 fn test_password_hash() {
     let password = "test_password_123";
-    let hash = galaxy_proxy::auth::PasswordService::hash_password(password).unwrap();
+    let hash = galaxy_router::auth::PasswordService::hash_password(password).unwrap();
 
-    assert!(galaxy_proxy::auth::PasswordService::verify_password(password, &hash).unwrap());
-    assert!(!galaxy_proxy::auth::PasswordService::verify_password("wrong", &hash).unwrap());
+    assert!(galaxy_router::auth::PasswordService::verify_password(password, &hash).unwrap());
+    assert!(!galaxy_router::auth::PasswordService::verify_password("wrong", &hash).unwrap());
 }
 
 #[test]
 fn test_jwt_token() {
-    let jwt_service = galaxy_proxy::auth::JwtService::new("test_secret", 24);
+    let jwt_service = galaxy_router::auth::JwtService::new("test_secret", 24);
     let token = jwt_service.generate_token("1", "admin").unwrap();
     let claims = jwt_service.verify_token(&token).unwrap();
 
@@ -70,7 +70,7 @@ async fn test_channel_multi_endpoint() {
     let _ = std::fs::remove_dir_all("/tmp/galaxy_test_channel_multi");
     std::fs::create_dir_all("/tmp/galaxy_test_channel_multi").unwrap();
 
-    let db = galaxy_proxy::db::Database::new(&db_url).await.unwrap();
+    let db = galaxy_router::db::Database::new(&db_url).await.unwrap();
     let pool = db.pool().clone();
 
     // 创建多端点渠道（类似百炼 Coding Plan）
@@ -117,7 +117,7 @@ async fn test_channel_single_endpoint() {
     let _ = std::fs::remove_dir_all("/tmp/galaxy_test_channel_single");
     std::fs::create_dir_all("/tmp/galaxy_test_channel_single").unwrap();
 
-    let db = galaxy_proxy::db::Database::new(&db_url).await.unwrap();
+    let db = galaxy_router::db::Database::new(&db_url).await.unwrap();
     let pool = db.pool().clone();
 
     // 创建单端点渠道
@@ -158,7 +158,7 @@ async fn test_group_with_channel() {
     let _ = std::fs::remove_dir_all("/tmp/galaxy_test_group_channel");
     std::fs::create_dir_all("/tmp/galaxy_test_group_channel").unwrap();
 
-    let db = galaxy_proxy::db::Database::new(&db_url).await.unwrap();
+    let db = galaxy_router::db::Database::new(&db_url).await.unwrap();
     let pool = db.pool().clone();
 
     // 创建渠道
@@ -226,7 +226,7 @@ async fn test_api_key_crud() {
     let _ = std::fs::remove_dir_all("/tmp/galaxy_test_api_key");
     std::fs::create_dir_all("/tmp/galaxy_test_api_key").unwrap();
 
-    let db = galaxy_proxy::db::Database::new(&db_url).await.unwrap();
+    let db = galaxy_router::db::Database::new(&db_url).await.unwrap();
     let pool = db.pool().clone();
 
     let key_id = uuid::Uuid::now_v7().to_string();
@@ -264,8 +264,8 @@ async fn test_api_key_crud() {
 
 #[test]
 fn test_openai_chat_transform() {
-    use galaxy_proxy::protocol::inbound::Inbound;
-    use galaxy_proxy::protocol::openai_chat::OpenAiChatInbound;
+    use galaxy_router::protocol::inbound::Inbound;
+    use galaxy_router::protocol::openai_chat::OpenAiChatInbound;
 
     let inbound = OpenAiChatInbound;
     let headers = axum::http::HeaderMap::new();
@@ -285,14 +285,14 @@ fn test_openai_chat_transform() {
     assert_eq!(request.messages.len(), 1);
     assert_eq!(
         request.messages[0].role,
-        galaxy_proxy::protocol::model::Role::User
+        galaxy_router::protocol::model::Role::User
     );
 }
 
 #[test]
 fn test_anthropic_transform() {
-    use galaxy_proxy::protocol::anthropic::AnthropicInbound;
-    use galaxy_proxy::protocol::inbound::Inbound;
+    use galaxy_router::protocol::anthropic::AnthropicInbound;
+    use galaxy_router::protocol::inbound::Inbound;
 
     let inbound = AnthropicInbound;
     let headers = axum::http::HeaderMap::new();
@@ -318,7 +318,7 @@ fn test_anthropic_transform() {
 
 #[test]
 fn test_endpoint_type_paths() {
-    use galaxy_proxy::api::handlers::admin::channels::EndpointType;
+    use galaxy_router::api::handlers::admin::channels::EndpointType;
 
     assert_eq!(EndpointType::OpenAiChat.path(), "/chat/completions");
     assert_eq!(EndpointType::OpenAiResponse.path(), "/responses");
@@ -329,7 +329,7 @@ fn test_endpoint_type_paths() {
 
 #[test]
 fn test_endpoint_type_serialization() {
-    use galaxy_proxy::api::handlers::admin::channels::EndpointType;
+    use galaxy_router::api::handlers::admin::channels::EndpointType;
 
     // 序列化
     let json = serde_json::to_string(&EndpointType::OpenAiChat).unwrap();

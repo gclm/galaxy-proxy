@@ -1,4 +1,4 @@
-# Galaxy Proxy Makefile
+# Galaxy Router Makefile
 
 .PHONY: all build frontend-build dev dev-rust dev-frontend dev-stop \
         test fmt clippy clean check doc watch watch-test db-reset \
@@ -10,7 +10,7 @@
 
 VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo 'dev')
 COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo 'unknown')
-APP     := galaxy-proxy
+APP     := galaxy-router
 DIST    := build/dist
 
 # 默认目标
@@ -128,15 +128,15 @@ release-all: release-darwin-arm64 release-darwin-x86_64 \
 # ===== Docker =====
 
 docker:
-	docker build -t galaxy-proxy:latest .
+	docker build -t galaxy-router:latest .
 
 docker-run:
-	docker run -p 8080:8080 -v $(PWD)/data:/app/data galaxy-proxy:latest
+	docker run -p 8080:8080 -v $(PWD)/data:/app/data galaxy-router:latest
 
 # ===== 帮助 =====
 
 help:
-	@echo "Galaxy Proxy - AI 协议互转代理网关"
+	@echo "Galaxy Router - AI 协议互转代理网关"
 	@echo ""
 	@echo "用法: make [target]"
 	@echo ""
@@ -161,7 +161,5 @@ help:
 	@echo "  release-archive TARGET=<triple>  打 zip 包"
 	@echo ""
 	@echo "运维:"
-	@echo "  docker             Docker 构建"
-	@echo "  docker-run         Docker 运行"
 	@echo "  db-reset           重置数据库"
 	@echo "  clean              清理构建产物"

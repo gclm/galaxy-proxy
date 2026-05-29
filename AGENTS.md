@@ -1,4 +1,4 @@
-# Galaxy Proxy 开发规范
+# Galaxy Router 开发规范
 
 ## 项目概述
 

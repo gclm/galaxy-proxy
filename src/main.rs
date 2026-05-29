@@ -17,9 +17,9 @@ mod stats;
 use config::AppConfig;
 use db::Database;
 
-/// Galaxy Proxy - AI 协议互转代理网关
+/// Galaxy Router - AI 协议互转代理网关
 #[derive(Parser, Debug)]
-#[command(name = "galaxy-proxy", version, about)]
+#[command(name = "galaxy-router", version, about)]
 struct Cli {
     /// 配置文件路径
     #[arg(short, long, default_value = "config.toml")]

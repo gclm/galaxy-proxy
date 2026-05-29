@@ -1031,7 +1031,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "galaxy-proxy"
+name = "galaxy-router"
 version = "0.0.1"
 dependencies = [
  "anyhow",

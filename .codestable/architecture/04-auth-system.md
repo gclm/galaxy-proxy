@@ -165,8 +165,8 @@ lockout_minutes = 15           # 锁定时间
 
 ```bash
 # 命令行初始化（不用 Web）
-galaxy-proxy init --username admin --password xxx
+galaxy-router init --username admin --password xxx
 
 # 重置密码
-galaxy-proxy reset-password --username admin --password new-xxx
+galaxy-router reset-password --username admin --password new-xxx
 ```

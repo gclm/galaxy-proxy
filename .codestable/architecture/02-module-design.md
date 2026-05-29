@@ -3,7 +3,7 @@
 ## 目录结构
 
 ```
-galaxy-proxy/
+galaxy-router/
 ├── src/
 │   ├── main.rs                     # 入口，CLI 参数解析，服务启动
 │   ├── lib.rs                      # 库入口，模块导出

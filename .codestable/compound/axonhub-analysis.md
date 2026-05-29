@@ -1,6 +1,6 @@
 # AxonHub 项目分析
 
-**核心价值**: Galaxy Proxy 的协议转换层应直接参考此项目的 `llm/` 模块。
+**核心价值**: Galaxy Router 的协议转换层应直接参考此项目的 `llm/` 模块。
 
 ## 项目定位
 
@@ -154,9 +154,9 @@ type Stream[T any] interface {
 | Pipeline | `llm/pipeline/pipeline.go` |
 | 编排器 | `internal/server/orchestrator/orchestrator.go` |
 
-## 对 Galaxy Proxy 的启示
+## 对 Galaxy Router 的启示
 
-1. **直接复用架构**: AxonHub 的 `llm/` 模块设计成熟，Galaxy Proxy 的 Rust 实现应镜像这套接口
+1. **直接复用架构**: AxonHub 的 `llm/` 模块设计成熟，Galaxy Router 的 Rust 实现应镜像这套接口
 2. **统一模型以 OpenAI 为基准**: 减少转换代码量
 3. **流式处理用 trait**: Rust 中用 `trait Stream` 替代 Go 的接口
 4. **Inbound/Outbound 分离**: 每个协议一对 transformer，职责清晰

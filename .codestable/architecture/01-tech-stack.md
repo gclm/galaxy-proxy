@@ -26,17 +26,17 @@
 
 ## 与 CCG Gateway 技术栈对比
 
-| 维度 | CCG Gateway | Galaxy Proxy | 差异原因 |
+| 维度 | CCG Gateway | Galaxy Router | 差异原因 |
 |------|-------------|--------------|---------|
 | HTTP 框架 | axum 0.7 | axum 0.7 | 一致 |
 | 数据库 | SQLite + sqlx | SQLite + sqlx | 一致 |
 | HTTP 客户端 | reqwest 0.12 | reqwest 0.12 | 一致 |
-| 配置 | 环境变量 + DB | TOML 文件 + API | Galaxy Proxy 需要文件配置 |
-| 桌面框架 | Tauri 2.0 | 无 | Galaxy Proxy 是服务端 |
+| 配置 | 环境变量 + DB | TOML 文件 + API | Galaxy Router 需要文件配置 |
+| 桌面框架 | Tauri 2.0 | 无 | Galaxy Router 是服务端 |
 
 ## 与 AxonHub 技术栈对比
 
-| 维度 | AxonHub (Go) | Galaxy Proxy (Rust) | Rust 等价物 |
+| 维度 | AxonHub (Go) | Galaxy Router (Rust) | Rust 等价物 |
 |------|--------------|---------------------|-------------|
 | Web 框架 | Gin | axum | — |
 | ORM | Ent | sqlx | — |

@@ -22,7 +22,7 @@ pub async fn list(
                         "id": name,
                         "object": "model",
                         "created": 0,
-                        "owned_by": "galaxy-proxy"
+                        "owned_by": "galaxy-router"
                     })
                 })
                 .collect();

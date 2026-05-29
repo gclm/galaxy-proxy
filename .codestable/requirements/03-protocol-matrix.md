@@ -52,7 +52,7 @@
 AxonHub 的 `llm/model.go` 定义了成熟的统一模型，以 OpenAI Chat Completion 为基准扩展：
 
 ```rust
-// Galaxy Proxy 的 Rust 实现应镜像此设计
+// Galaxy Router 的 Rust 实现应镜像此设计
 struct LlmRequest {
     messages: Vec<Message>,
     model: String,

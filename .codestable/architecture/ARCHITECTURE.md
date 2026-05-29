@@ -1,4 +1,4 @@
-# Galaxy Proxy 架构总入口
+# Galaxy Router 架构总入口
 
 > 状态：迁移完成
 > 创建日期：2026-05-26

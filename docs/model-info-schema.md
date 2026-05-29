@@ -6,7 +6,7 @@
 
 models.dev API 只提供 `id` + `cost`（$/1M tokens），
 模型元数据（max_tokens、supports_* 等）来自 litellm 内置数据，
-在 `sync_prices.py` 脚本中合并。galaxy-proxy 需自行从 models.dev
+在 `sync_prices.py` 脚本中合并。galaxy-router 需自行从 models.dev
 获取全部可用字段（未来 API 扩展后自动生效），同时支持手动补充。
 
 ## DB 表结构 `model_info`
