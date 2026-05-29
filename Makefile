@@ -161,5 +161,7 @@ help:
 	@echo "  release-archive TARGET=<triple>  打 zip 包"
 	@echo ""
 	@echo "运维:"
+	@echo "  docker             Docker 构建"
+	@echo "  docker-run         Docker 运行"
 	@echo "  db-reset           重置数据库"
 	@echo "  clean              清理构建产物"
