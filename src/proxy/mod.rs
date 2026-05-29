@@ -52,17 +52,18 @@ impl ProxyCache {
         let mut cache = self.channels.write().await;
 
         if cache.len() >= CACHE_MAX_SIZE
-            && let Some(oldest_key) = cache.keys().next().cloned() {
-                let mut idx = self.model_index.write().await;
-                if let Some(old_ch) = cache.get(&oldest_key) {
-                    for model in &old_ch.models {
-                        if let Some(ids) = idx.get_mut(model) {
-                            ids.retain(|id| id != &oldest_key);
-                        }
+            && let Some(oldest_key) = cache.keys().next().cloned()
+        {
+            let mut idx = self.model_index.write().await;
+            if let Some(old_ch) = cache.get(&oldest_key) {
+                for model in &old_ch.models {
+                    if let Some(ids) = idx.get_mut(model) {
+                        ids.retain(|id| id != &oldest_key);
                     }
                 }
-                cache.remove(&oldest_key);
             }
+            cache.remove(&oldest_key);
+        }
 
         // 更新模型反向索引
         {
@@ -109,9 +110,10 @@ impl ProxyCache {
     pub async fn set_group(&self, group: GroupInfo) {
         let mut cache = self.groups.write().await;
         if cache.len() >= CACHE_MAX_SIZE
-            && let Some(oldest_key) = cache.keys().next().cloned() {
-                cache.remove(&oldest_key);
-            }
+            && let Some(oldest_key) = cache.keys().next().cloned()
+        {
+            cache.remove(&oldest_key);
+        }
         cache.insert(group.name.clone(), group);
     }
 
@@ -252,20 +254,18 @@ impl ProxyState {
         .unwrap_or(false);
 
         let proxy_url = if proxy_enabled {
-            sqlx::query_scalar::<_, String>(
-                "SELECT value FROM settings WHERE key = 'proxy.url'",
-            )
-            .fetch_optional(&pool)
-            .await
-            .ok()
-            .flatten()
-            .filter(|v| !v.is_empty())
+            sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = 'proxy.url'")
+                .fetch_optional(&pool)
+                .await
+                .ok()
+                .flatten()
+                .filter(|v| !v.is_empty())
         } else {
             None
         };
 
-        let mut client_builder = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(300));
+        let mut client_builder =
+            reqwest::Client::builder().timeout(std::time::Duration::from_secs(300));
 
         if let Some(url) = proxy_url {
             match reqwest::Proxy::all(&url) {
@@ -312,8 +312,10 @@ impl ProxyState {
         endpoint_type: EndpointType,
         session_hash: Option<&str>,
     ) -> Result<SelectionResult, ProxyError> {
-        self.select_channel_inner(model, session_hash, &[], |ch| ch.find_endpoint(&endpoint_type))
-            .await
+        self.select_channel_inner(model, session_hash, &[], |ch| {
+            ch.find_endpoint(&endpoint_type)
+        })
+        .await
     }
 
     /// 选择渠道和端点（支持排除已失败渠道，精确匹配端点类型）
@@ -324,8 +326,10 @@ impl ProxyState {
         session_hash: Option<&str>,
         exclude_ids: &[String],
     ) -> Result<SelectionResult, ProxyError> {
-        self.select_channel_inner(model, session_hash, exclude_ids, |ch| ch.find_endpoint(&endpoint_type))
-            .await
+        self.select_channel_inner(model, session_hash, exclude_ids, |ch| {
+            ch.find_endpoint(&endpoint_type)
+        })
+        .await
     }
 
     /// 按模型选择渠道（不限端点类型，用于跨协议转换）
@@ -347,8 +351,10 @@ impl ProxyState {
         session_hash: Option<&str>,
         exclude_ids: &[String],
     ) -> Result<SelectionResult, ProxyError> {
-        self.select_channel_inner(model, session_hash, exclude_ids, |ch| ch.endpoints.first().cloned())
-            .await
+        self.select_channel_inner(model, session_hash, exclude_ids, |ch| {
+            ch.endpoints.first().cloned()
+        })
+        .await
     }
 
     /// 选择渠道内部实现（统一逻辑）
@@ -362,12 +368,17 @@ impl ProxyState {
         // 1. 检查粘性会话
         if let Some(hash) = session_hash
             && let Some(channel_id) = self.lb_state.get_sticky_session(hash).await
-                && !exclude_ids.contains(&channel_id)
-                    && let Ok(channel) = self.get_channel(&channel_id).await
-                        && let Some(endpoint) = find_endpoint(&channel) {
-                            let target_model = self.apply_model_mapping(&channel, model);
-                            return Ok(SelectionResult { channel, target_model, endpoint });
-                        }
+            && !exclude_ids.contains(&channel_id)
+            && let Ok(channel) = self.get_channel(&channel_id).await
+            && let Some(endpoint) = find_endpoint(&channel)
+        {
+            let target_model = self.apply_model_mapping(&channel, model);
+            return Ok(SelectionResult {
+                channel,
+                target_model,
+                endpoint,
+            });
+        }
 
         // 2. 查找分组（精确匹配 → 正则匹配）
         let group = match self.find_group_by_name(model).await? {
@@ -377,25 +388,36 @@ impl ProxyState {
 
         // 3. 从分组中选择渠道
         if let Some(group) = group
-            && let Ok(item) = self.select_group_item(&group, exclude_ids).await {
-                let channel = self.get_channel(&item.channel_id).await?;
-                if let Some(endpoint) = find_endpoint(&channel) {
-                    if let Some(hash) = session_hash {
-                        self.lb_state.set_sticky_session(hash, &channel.id).await;
-                    }
-                    let target_model = item.model_name.clone();
-                    return Ok(SelectionResult { channel, target_model, endpoint });
+            && let Ok(item) = self.select_group_item(&group, exclude_ids).await
+        {
+            let channel = self.get_channel(&item.channel_id).await?;
+            if let Some(endpoint) = find_endpoint(&channel) {
+                if let Some(hash) = session_hash {
+                    self.lb_state.set_sticky_session(hash, &channel.id).await;
                 }
+                let target_model = item.model_name.clone();
+                return Ok(SelectionResult {
+                    channel,
+                    target_model,
+                    endpoint,
+                });
             }
+        }
 
         // 4. 直接查找渠道
-        let channel = self.find_channel_by_model(model, exclude_ids, |ch| find_endpoint(ch).is_some()).await?;
+        let channel = self
+            .find_channel_by_model(model, exclude_ids, |ch| find_endpoint(ch).is_some())
+            .await?;
         if let Some(endpoint) = find_endpoint(&channel) {
             if let Some(hash) = session_hash {
                 self.lb_state.set_sticky_session(hash, &channel.id).await;
             }
             let target_model = self.apply_model_mapping(&channel, model);
-            return Ok(SelectionResult { channel, target_model, endpoint });
+            return Ok(SelectionResult {
+                channel,
+                target_model,
+                endpoint,
+            });
         }
 
         Err(ProxyError::NoAvailableChannel("没有可用渠道".to_string()))
@@ -446,10 +468,11 @@ impl ProxyState {
         for (id, name, match_regex) in groups {
             if let Some(regex) = match_regex
                 && let Ok(re) = regex::Regex::new(&regex)
-                    && re.is_match(model) {
-                        let items = self.get_group_items(&id).await?;
-                        return Ok(Some(GroupInfo { id, name, items }));
-                    }
+                && re.is_match(model)
+            {
+                let items = self.get_group_items(&id).await?;
+                return Ok(Some(GroupInfo { id, name, items }));
+            }
         }
 
         Ok(None)
@@ -560,7 +583,8 @@ impl ProxyState {
         let endpoints: Vec<EndpointConfig> =
             serde_json::from_str(&endpoints_str).unwrap_or_default();
         let models = parse_models(&models_str);
-        let custom_headers: Vec<CustomHeader> = serde_json::from_str(&custom_headers_str).unwrap_or_default();
+        let custom_headers: Vec<CustomHeader> =
+            serde_json::from_str(&custom_headers_str).unwrap_or_default();
 
         let channel = ChannelInfo {
             id,
@@ -592,9 +616,10 @@ impl ProxyState {
                     continue;
                 }
                 if let Ok(channel) = self.get_channel(cid).await
-                    && endpoint_filter(&channel) {
-                        return Ok(channel);
-                    }
+                    && endpoint_filter(&channel)
+                {
+                    return Ok(channel);
+                }
             }
         }
 
@@ -624,7 +649,8 @@ impl ProxyState {
                 continue;
             }
 
-            let custom_headers: Vec<CustomHeader> = serde_json::from_str(&custom_headers_str).unwrap_or_default();
+            let custom_headers: Vec<CustomHeader> =
+                serde_json::from_str(&custom_headers_str).unwrap_or_default();
 
             let channel = ChannelInfo {
                 id: id.clone(),
@@ -658,7 +684,8 @@ impl ProxyState {
             return String::new();
         }
 
-        let idx = self.key_counter.fetch_add(1, Ordering::Relaxed) as usize % channel.api_keys.len();
+        let idx =
+            self.key_counter.fetch_add(1, Ordering::Relaxed) as usize % channel.api_keys.len();
         channel.api_keys[idx].clone()
     }
 }
@@ -694,7 +721,10 @@ pub fn get_outbound(endpoint_type: &EndpointType) -> &'static dyn Outbound {
 }
 
 /// 从响应体提取 usage 数据
-pub fn extract_usage(body: &serde_json::Value, endpoint_type: &EndpointType) -> (i32, i32, i32, i32) {
+pub fn extract_usage(
+    body: &serde_json::Value,
+    endpoint_type: &EndpointType,
+) -> (i32, i32, i32, i32) {
     let usage = &body["usage"];
     match endpoint_type {
         EndpointType::OpenAiChat | EndpointType::OpenAiResponse => {
@@ -709,9 +739,7 @@ pub fn extract_usage(body: &serde_json::Value, endpoint_type: &EndpointType) -> 
             let input = usage["input_tokens"].as_i64().unwrap_or(0) as i32;
             let output = usage["output_tokens"].as_i64().unwrap_or(0) as i32;
             let cache_read = usage["cache_read_input_tokens"].as_i64().unwrap_or(0) as i32;
-            let cache_creation = usage["cache_creation_input_tokens"]
-                .as_i64()
-                .unwrap_or(0) as i32;
+            let cache_creation = usage["cache_creation_input_tokens"].as_i64().unwrap_or(0) as i32;
             (input, output, cache_read, cache_creation)
         }
         _ => (0, 0, 0, 0),
@@ -805,11 +833,14 @@ async fn prepare_proxy_request(
     let request_body = if needs_conversion {
         let inbound = get_inbound(client_endpoint);
         let outbound = get_outbound(&upstream_endpoint);
-        let body_bytes = serde_json::to_vec(body)
+        let body_bytes =
+            serde_json::to_vec(body).map_err(|e| ProxyError::TransformError(e.to_string()))?;
+        let llm_request = inbound
+            .transform_request(&body_bytes, headers)
+            .await
             .map_err(|e| ProxyError::TransformError(e.to_string()))?;
-        let llm_request = inbound.transform_request(&body_bytes, headers).await
-            .map_err(|e| ProxyError::TransformError(e.to_string()))?;
-        outbound.transform_request(&llm_request)
+        outbound
+            .transform_request(&llm_request)
             .map_err(|e| ProxyError::TransformError(e.to_string()))?
     } else {
         serde_json::to_vec(body).map_err(|e| ProxyError::TransformError(e.to_string()))?
@@ -828,18 +859,26 @@ async fn prepare_proxy_request(
                 reqwest_headers.insert("anthropic-version", "2023-06-01".parse().unwrap());
             }
             _ => {
-                reqwest_headers.insert("Authorization", format!("Bearer {}", api_key).parse().unwrap());
+                reqwest_headers.insert(
+                    "Authorization",
+                    format!("Bearer {}", api_key).parse().unwrap(),
+                );
             }
         }
     }
 
-    let url = format!("{}{}", selection.endpoint.base_url, upstream_endpoint.path());
+    let url = format!(
+        "{}{}",
+        selection.endpoint.base_url,
+        upstream_endpoint.path()
+    );
 
     for header in &selection.channel.custom_headers {
         if let Ok(name) = reqwest::header::HeaderName::from_bytes(header.key.as_bytes())
-            && let Ok(value) = header.value.parse() {
-                reqwest_headers.insert(name, value);
-            }
+            && let Ok(value) = header.value.parse()
+        {
+            reqwest_headers.insert(name, value);
+        }
     }
 
     Ok(PreparedProxyRequest {
@@ -866,7 +905,9 @@ async fn execute_proxy_request(
     let prepared = prepare_proxy_request(state, headers, body, client_endpoint, selection).await?;
     let start_time = std::time::Instant::now();
 
-    let response = state.http_client.post(&prepared.url)
+    let response = state
+        .http_client
+        .post(&prepared.url)
         .headers(prepared.headers)
         .body(prepared.body)
         .send()
@@ -890,13 +931,18 @@ async fn execute_proxy_request(
                 (0, 0, 0, 0)
             };
         let cost = if input_tokens > 0 || output_tokens > 0 {
-            Some(state.model_registry.calculate_cost(
-                &prepared.target_model,
-                input_tokens,
-                output_tokens,
-                cache_read,
-                cache_creation,
-            ).await)
+            Some(
+                state
+                    .model_registry
+                    .calculate_cost(
+                        &prepared.target_model,
+                        input_tokens,
+                        output_tokens,
+                        cache_read,
+                        cache_creation,
+                    )
+                    .await,
+            )
         } else {
             None
         };
@@ -906,15 +952,26 @@ async fn execute_proxy_request(
             group_id: None,
             requested_model: prepared.model.clone(),
             actual_model: Some(prepared.target_model.clone()),
-            input_tokens, output_tokens, cache_read_tokens: cache_read, cache_creation_tokens: cache_creation,
+            input_tokens,
+            output_tokens,
+            cache_read_tokens: cache_read,
+            cache_creation_tokens: cache_creation,
             cost,
             latency_ms: Some(latency_ms as i32),
             status_code: Some(status_u16 as i32),
-            error_message: if !status.is_success() { Some(response_body.clone()) } else { None },
+            error_message: if !status.is_success() {
+                Some(response_body.clone())
+            } else {
+                None
+            },
             endpoint_type: Some(prepared.upstream_endpoint.as_str().to_string()),
-            request_type: if prepared.needs_conversion { "conversion".to_string() } else { "passthrough".to_string() },
+            request_type: if prepared.needs_conversion {
+                "conversion".to_string()
+            } else {
+                "passthrough".to_string()
+            },
             request_content,
-            response_content: if status.is_success() { Some(response_body.clone()) } else { None },
+            response_content: Some(response_body.clone()),
             is_stream: false,
         };
         let _ = state.stats_recorder.record_request(record).await;
@@ -927,23 +984,35 @@ async fn execute_proxy_request(
             status,
             &response_body[..response_body.len().min(300)]
         );
-        return Err(ProxyError::UpstreamError { status, body: response_body });
+        return Err(ProxyError::UpstreamError {
+            status,
+            body: response_body,
+        });
     }
 
-    state.lb_state.record_success(&prepared.channel_id, latency_ms as f64).await;
+    state
+        .lb_state
+        .record_success(&prepared.channel_id, latency_ms as f64)
+        .await;
 
     let final_body = if prepared.needs_conversion {
         let inbound = get_inbound(client_endpoint);
         let outbound = get_outbound(&prepared.upstream_endpoint);
-        let llm_response = outbound.transform_response(response_body.as_bytes(), status.as_u16()).await
+        let llm_response = outbound
+            .transform_response(response_body.as_bytes(), status.as_u16())
+            .await
             .map_err(|e| ProxyError::TransformError(e.to_string()))?;
-        inbound.transform_response(&llm_response)
+        inbound
+            .transform_response(&llm_response)
             .map_err(|e| ProxyError::TransformError(e.to_string()))?
     } else {
         response_body.into_bytes()
     };
 
-    Ok(ProxySuccess { status, body: final_body })
+    Ok(ProxySuccess {
+        status,
+        body: final_body,
+    })
 }
 
 /// 非流式代理请求（支持重试和排队）
@@ -956,9 +1025,12 @@ pub async fn proxy_request(
 ) -> Result<ProxySuccess, ProxyError> {
     // 排队控制
     let _permit = if let Some(queue) = &state.queue {
-        Some(queue.acquire().await.map_err(|e| {
-            ProxyError::RequestError(format!("排队失败: {}", e))
-        })?)
+        Some(
+            queue
+                .acquire()
+                .await
+                .map_err(|e| ProxyError::RequestError(format!("排队失败: {}", e)))?,
+        )
     } else {
         None
     };
@@ -968,10 +1040,20 @@ pub async fn proxy_request(
     let mut last_error = None;
 
     for attempt in 0..max_retries {
-        let selection = select_channel_for_proxy(state, headers, body, client_endpoint, &exclude_ids).await?;
+        let selection =
+            select_channel_for_proxy(state, headers, body, client_endpoint, &exclude_ids).await?;
         let channel_id = selection.channel.id.clone();
 
-        match execute_proxy_request(state, api_key_id, headers, body, client_endpoint, &selection).await {
+        match execute_proxy_request(
+            state,
+            api_key_id,
+            headers,
+            body,
+            client_endpoint,
+            &selection,
+        )
+        .await
+        {
             Ok(result) => return Ok(result),
             Err(ProxyError::UpstreamError { status, body }) => {
                 tracing::warn!(
@@ -991,8 +1073,12 @@ pub async fn proxy_request(
         }
     }
 
-    tracing::error!("所有重试耗尽, model={}", body["model"].as_str().unwrap_or("unknown"));
-    Err(last_error.unwrap_or_else(|| ProxyError::NoAvailableChannel("所有渠道都不可用".to_string())))
+    tracing::error!(
+        "所有重试耗尽, model={}",
+        body["model"].as_str().unwrap_or("unknown")
+    );
+    Err(last_error
+        .unwrap_or_else(|| ProxyError::NoAvailableChannel("所有渠道都不可用".to_string())))
 }
 
 /// 执行单次流式代理请求
@@ -1020,7 +1106,9 @@ async fn execute_proxy_stream(
     let prepared = prepare_proxy_request(state, headers, body, client_endpoint, selection).await?;
     let start_time = std::time::Instant::now();
 
-    let response = state.http_client.post(&prepared.url)
+    let response = state
+        .http_client
+        .post(&prepared.url)
         .headers(prepared.headers)
         .body(prepared.body)
         .send()
@@ -1028,12 +1116,42 @@ async fn execute_proxy_stream(
         .map_err(|e| ProxyError::RequestError(e.to_string()))?;
 
     if !response.status().is_success() {
+        let latency_ms = start_time.elapsed().as_millis() as i64;
         let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(ProxyError::UpstreamError { status, body });
-    }
+        let response_body = response.text().await.unwrap_or_default();
+        let request_content = serde_json::to_string(&body).ok();
 
-    state.lb_state.record_success(&prepared.channel_id, start_time.elapsed().as_millis() as f64).await;
+        let record = crate::stats::recorder::RequestRecord {
+            api_key_id: api_key_id.map(|s| s.to_string()),
+            channel_id: Some(prepared.channel_id.clone()),
+            group_id: None,
+            requested_model: prepared.model.clone(),
+            actual_model: Some(prepared.target_model.clone()),
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            cost: None,
+            latency_ms: Some(latency_ms as i32),
+            status_code: Some(status.as_u16() as i32),
+            error_message: Some(response_body.clone()),
+            endpoint_type: Some(prepared.upstream_endpoint.as_str().to_string()),
+            request_type: if prepared.needs_conversion {
+                "conversion".to_string()
+            } else {
+                "passthrough".to_string()
+            },
+            request_content,
+            response_content: Some(response_body.clone()),
+            is_stream: true,
+        };
+        let _ = state.stats_recorder.record_request(record).await;
+
+        return Err(ProxyError::UpstreamError {
+            status,
+            body: response_body,
+        });
+    }
 
     let upstream_stream = response.bytes_stream();
     use futures::StreamExt;
@@ -1053,6 +1171,7 @@ async fn execute_proxy_stream(
         let mut last_usage: Option<serde_json::Value> = None;
         let mut buffer = Vec::new();
         let mut collected_text = String::new();
+        let mut stream_error: Option<String> = None;
 
         if needs_conversion {
             let inbound = get_inbound(&client_endpoint_clone);
@@ -1078,6 +1197,22 @@ async fn execute_proxy_stream(
                                 && let Some(usage) = extract_usage_from_sse(text, &upstream_endpoint_clone) {
                                     last_usage = Some(usage);
                                 }
+                            let mut is_error_event = false;
+                            if stream_error.is_none()
+                                && let Ok(text) = std::str::from_utf8(&event_bytes)
+                                && let Some(error) = extract_error_from_sse(text, &upstream_endpoint_clone) {
+                                    stream_error = Some(error);
+                                    is_error_event = true;
+                                }
+                            if is_error_event {
+                                if let Some(error) = stream_error.as_deref() {
+                                    yield Ok::<_, std::convert::Infallible>(Bytes::from(format_stream_error_event(
+                                        error,
+                                        &client_endpoint_clone,
+                                    )));
+                                }
+                                continue;
+                            }
 
                             // 转换事件
                             match outbound.transform_stream_event(&event_bytes) {
@@ -1118,10 +1253,24 @@ async fn execute_proxy_stream(
                     && let Some(usage) = extract_usage_from_sse(text, &upstream_endpoint_clone) {
                         last_usage = Some(usage);
                     }
-                if let Ok(Some(llm_stream)) = outbound.transform_stream_event(&buffer)
-                    && let Ok(converted) = inbound.transform_stream_event(&llm_stream) {
-                        yield Ok(Bytes::from(converted));
+                let mut is_error_event = false;
+                if stream_error.is_none()
+                    && let Ok(text) = std::str::from_utf8(&buffer)
+                    && let Some(error) = extract_error_from_sse(text, &upstream_endpoint_clone) {
+                        stream_error = Some(error);
+                        is_error_event = true;
                     }
+                if !is_error_event {
+                    if let Ok(Some(llm_stream)) = outbound.transform_stream_event(&buffer)
+                        && let Ok(converted) = inbound.transform_stream_event(&llm_stream) {
+                            yield Ok(Bytes::from(converted));
+                        }
+                } else if let Some(error) = stream_error.as_deref() {
+                    yield Ok(Bytes::from(format_stream_error_event(
+                        error,
+                        &client_endpoint_clone,
+                    )));
+                }
             }
         } else {
             // 直通模式
@@ -1132,6 +1281,10 @@ async fn execute_proxy_stream(
                             if let Some(usage) = extract_usage_from_sse(text, &upstream_endpoint_clone) {
                                 last_usage = Some(usage);
                             }
+                            if stream_error.is_none()
+                                && let Some(error) = extract_error_from_sse(text, &upstream_endpoint_clone) {
+                                    stream_error = Some(error);
+                                }
                             collect_sse_text(text, &upstream_endpoint_clone, &mut collected_text);
                         }
                         yield Ok::<_, std::convert::Infallible>(bytes);
@@ -1163,6 +1316,22 @@ async fn execute_proxy_stream(
             None
         };
 
+        let (status_code, error_message, response_content) = if let Some(error) = stream_error {
+            state_clone.lb_state.record_failure(&channel_id_clone, false).await;
+            (
+                502,
+                Some(sanitize_upstream_error(&error)),
+                Some(error),
+            )
+        } else {
+            state_clone.lb_state.record_success(&channel_id_clone, latency_ms as f64).await;
+            (
+                200,
+                None,
+                if collected_text.is_empty() { None } else { Some(collected_text) },
+            )
+        };
+
         let record = crate::stats::recorder::RequestRecord {
             api_key_id: api_key_id_clone,
             channel_id: Some(channel_id_clone),
@@ -1175,12 +1344,12 @@ async fn execute_proxy_stream(
             cache_creation_tokens: cache_creation,
             cost,
             latency_ms: Some(latency_ms as i32),
-            status_code: Some(200),
-            error_message: None,
+            status_code: Some(status_code),
+            error_message,
             endpoint_type: Some(client_endpoint_clone.as_str().to_string()),
             request_type: if needs_conversion { "conversion".to_string() } else { "passthrough".to_string() },
             request_content: request_content_clone,
-            response_content: if collected_text.is_empty() { None } else { Some(collected_text) },
+            response_content,
             is_stream: true,
         };
 
@@ -1217,9 +1386,12 @@ pub async fn proxy_stream(
 > {
     // 排队控制
     let permit = if let Some(queue) = &state.queue {
-        Some(queue.acquire().await.map_err(|e| {
-            ProxyError::RequestError(format!("排队失败: {}", e))
-        })?)
+        Some(
+            queue
+                .acquire()
+                .await
+                .map_err(|e| ProxyError::RequestError(format!("排队失败: {}", e)))?,
+        )
     } else {
         None
     };
@@ -1233,7 +1405,16 @@ pub async fn proxy_stream(
             select_channel_for_proxy(state, headers, body, client_endpoint, &exclude_ids).await?;
         let channel_id = selection.channel.id.clone();
 
-        match execute_proxy_stream(state, api_key_id, headers, body, client_endpoint, &selection).await {
+        match execute_proxy_stream(
+            state,
+            api_key_id,
+            headers,
+            body,
+            client_endpoint,
+            &selection,
+        )
+        .await
+        {
             Ok(result) => {
                 // 流式连接成功，释放 permit（流式会持续很长时间，不应占用队列位置）
                 drop(permit);
@@ -1257,10 +1438,12 @@ pub async fn proxy_stream(
         }
     }
 
-    tracing::error!("流式重试耗尽, model={}", body["model"].as_str().unwrap_or("unknown"));
-    Err(last_error.unwrap_or_else(|| {
-        ProxyError::NoAvailableChannel("所有渠道都不可用".to_string())
-    }))
+    tracing::error!(
+        "流式重试耗尽, model={}",
+        body["model"].as_str().unwrap_or("unknown")
+    );
+    Err(last_error
+        .unwrap_or_else(|| ProxyError::NoAvailableChannel("所有渠道都不可用".to_string())))
 }
 
 /// 错误格式类型
@@ -1382,6 +1565,9 @@ fn sanitize_upstream_error(body: &str) -> String {
         if let Some(msg) = v["error"]["message"].as_str() {
             return msg.to_string();
         }
+        if let Some(msg) = v["error"].as_str() {
+            return msg.to_string();
+        }
         if let Some(msg) = v["message"].as_str() {
             return msg.to_string();
         }
@@ -1416,9 +1602,10 @@ fn extract_usage_from_sse(text: &str, endpoint_type: &EndpointType) -> Option<se
             for line in text.lines() {
                 if let Some(data) = line.strip_prefix("data: ")
                     && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data)
-                        && parsed.get("usage").is_some() {
-                            return Some(parsed);
-                        }
+                    && parsed.get("usage").is_some()
+                {
+                    return Some(parsed);
+                }
             }
             None
         }
@@ -1435,12 +1622,111 @@ fn extract_usage_from_sse(text: &str, endpoint_type: &EndpointType) -> Option<se
             }
             if event_type == "message_delta"
                 && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data)
-                    && parsed.get("usage").is_some() {
-                        return Some(parsed);
-                    }
+                && parsed.get("usage").is_some()
+            {
+                return Some(parsed);
+            }
             None
         }
         _ => None,
+    }
+}
+
+/// 从 SSE 事件中提取上游错误。很多供应商会先返回 HTTP 200，再通过 SSE error 事件返回业务错误。
+fn extract_error_from_sse(text: &str, _endpoint_type: &EndpointType) -> Option<String> {
+    let mut event_type = "";
+    let mut data_lines = Vec::new();
+
+    for line in text.lines() {
+        let line = line.trim_end_matches('\r');
+        if let Some(stripped) = line.strip_prefix("event: ") {
+            event_type = stripped.trim();
+        } else if let Some(stripped) = line.strip_prefix("data: ") {
+            data_lines.push(stripped.trim_start());
+        }
+    }
+
+    if data_lines.is_empty() {
+        return None;
+    }
+
+    let data = data_lines.join("\n");
+    if data.is_empty() || data == "[DONE]" {
+        return None;
+    }
+
+    let is_error_event = event_type.eq_ignore_ascii_case("error")
+        || event_type.to_ascii_lowercase().contains("error")
+        || event_type.eq_ignore_ascii_case("response.failed");
+
+    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&data) {
+        if is_error_json(&parsed, is_error_event) {
+            return Some(data);
+        }
+        return None;
+    }
+
+    if is_error_event {
+        return Some(data);
+    }
+
+    None
+}
+
+fn is_error_json(value: &serde_json::Value, is_error_event: bool) -> bool {
+    if value.get("error").is_some() {
+        return true;
+    }
+
+    if let Some(t) = value["type"].as_str() {
+        let lower = t.to_ascii_lowercase();
+        if lower == "error" || lower.contains("error") || lower == "response.failed" {
+            return true;
+        }
+    }
+
+    is_error_event
+        && (value.get("message").is_some()
+            || value.get("code").is_some()
+            || value.get("type").is_some())
+}
+
+fn format_stream_error_event(error_body: &str, client_endpoint: &EndpointType) -> Vec<u8> {
+    let message = sanitize_upstream_error(error_body);
+
+    match client_endpoint {
+        EndpointType::Anthropic => format!(
+            "event: error\ndata: {}\n\n",
+            serde_json::json!({
+                "type": "error",
+                "error": {
+                    "type": "api_error",
+                    "message": message,
+                }
+            })
+        )
+        .into_bytes(),
+        EndpointType::OpenAiResponse => format!(
+            "event: response.failed\ndata: {}\n\n",
+            serde_json::json!({
+                "type": "response.failed",
+                "error": {
+                    "message": message,
+                    "type": "server_error",
+                }
+            })
+        )
+        .into_bytes(),
+        _ => format!(
+            "data: {}\n\n",
+            serde_json::json!({
+                "error": {
+                    "message": message,
+                    "type": "server_error",
+                }
+            })
+        )
+        .into_bytes(),
     }
 }
 
@@ -1450,12 +1736,15 @@ fn collect_sse_text(text: &str, endpoint_type: &EndpointType, output: &mut Strin
         EndpointType::OpenAiChat | EndpointType::OpenAiResponse => {
             for line in text.lines() {
                 if let Some(data) = line.strip_prefix("data: ") {
-                    if data == "[DONE]" { continue; }
+                    if data == "[DONE]" {
+                        continue;
+                    }
                     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data)
                         && let Some(content) = parsed["choices"][0]["delta"]["content"].as_str()
-                            && !content.is_empty() {
-                                output.push_str(content);
-                            }
+                        && !content.is_empty()
+                    {
+                        output.push_str(content);
+                    }
                 }
             }
         }
@@ -1463,10 +1752,11 @@ fn collect_sse_text(text: &str, endpoint_type: &EndpointType, output: &mut Strin
             for line in text.lines() {
                 if let Some(data) = line.strip_prefix("data: ")
                     && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data)
-                        && parsed["type"] == "content_block_delta"
-                            && let Some(t) = parsed["delta"]["text"].as_str() {
-                                output.push_str(t);
-                            }
+                    && parsed["type"] == "content_block_delta"
+                    && let Some(t) = parsed["delta"]["text"].as_str()
+                {
+                    output.push_str(t);
+                }
             }
         }
         _ => {}
@@ -1494,15 +1784,72 @@ fn parse_models(models_str: &str) -> Vec<String> {
 
     // 新格式：直接是数组
     if let Some(arr) = value.as_array() {
-        return arr.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+        return arr
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
     }
 
     // 旧格式：从 available_models 字段提取
     if let Some(available) = value["available_models"].as_array() {
-        return available.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+        return available
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
     }
 
     Vec::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_error_from_sse_detects_openai_error_payload() {
+        let event = r#"data: {"error":{"message":"[1113][余额不足或无可用资源包,请充值。]","type":"server_error"}}"#;
+
+        let error = extract_error_from_sse(event, &EndpointType::OpenAiChat).unwrap();
+
+        assert!(error.contains("1113"));
+        assert!(error.contains("余额不足"));
+    }
+
+    #[test]
+    fn extract_error_from_sse_detects_anthropic_error_event() {
+        let event = r#"event: error
+data: {"type":"error","error":{"type":"api_error","message":"resource exhausted"}}"#;
+
+        let error = extract_error_from_sse(event, &EndpointType::Anthropic).unwrap();
+
+        assert!(error.contains("resource exhausted"));
+    }
+
+    #[test]
+    fn extract_error_from_sse_detects_responses_failed_event() {
+        let event = r#"event: response.failed
+data: {"type":"response.failed","response":{"status":"failed"},"error":{"message":"quota exceeded"}}"#;
+
+        let error = extract_error_from_sse(event, &EndpointType::OpenAiResponse).unwrap();
+
+        assert!(error.contains("quota exceeded"));
+    }
+
+    #[test]
+    fn extract_error_from_sse_ignores_normal_delta() {
+        let event = r#"data: {"choices":[{"delta":{"content":"hello"}}]}"#;
+
+        let error = extract_error_from_sse(event, &EndpointType::OpenAiChat);
+
+        assert!(error.is_none());
+    }
+
+    #[test]
+    fn sanitize_upstream_error_extracts_string_error() {
+        let message = sanitize_upstream_error(r#"{"error":"plain upstream error"}"#);
+
+        assert_eq!(message, "plain upstream error");
+    }
 }
 
 /// 代理错误
@@ -1524,8 +1871,5 @@ pub enum ProxyError {
     TransformError(String),
 
     #[error("上游错误: {status}")]
-    UpstreamError {
-        status: StatusCode,
-        body: String,
-    },
+    UpstreamError { status: StatusCode, body: String },
 }

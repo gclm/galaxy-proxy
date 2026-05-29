@@ -148,6 +148,30 @@ jwt_secret = ""  # 首次运行自动生成
 - `sticky_session` - 粘性会话配置
 - `stats` - 统计配置
 
+### Homebrew 本地部署排查
+
+通过 Homebrew 部署运行时，不要默认查看仓库内的 `data/galaxy.db` 或 `logs/galaxy.log`。先以 launchd 配置为准确认实际路径：
+
+```bash
+plutil -p ~/Library/LaunchAgents/homebrew.mxcl.galaxy-router.plist
+```
+
+当前 Homebrew 服务通常使用：
+
+- 配置文件: `/opt/homebrew/etc/galaxy-router/config.toml`
+- 工作目录: `/opt/homebrew/var/lib/galaxy-router`
+- 数据库: `/opt/homebrew/var/lib/galaxy-router/galaxy.db`
+- 日志: `/opt/homebrew/var/log/galaxy-router/output.log`、`/opt/homebrew/var/log/galaxy-router/error.log`
+
+排查 cc / Claude Code 报错时，优先按这个顺序核对：
+
+1. 用报错里的时间戳换算服务日志时间。`output.log` 使用 UTC 时间（例如 `2026-05-29T07:52:24Z` 对应北京时间 `2026-05-29 15:52:24`）。
+2. 查询实际运行库的 `usage_logs`，确认 `requested_model`、`actual_model`、`channel_id`、`status_code`、`is_stream`、`error_message`、`response_content`。
+3. 用 `channel_id` 回查 `channels` 表，确认命中的渠道、端点和该渠道的 key 数量。
+4. 如果 cc 看见了上游错误，但 Web 请求日志没有失败记录，重点检查是否为流式请求。
+
+当前实现里有一个重要限制：非流式上游失败会把上游响应体写入 `error_message`，但 `response_content` 只在成功时写入；流式请求在建立 SSE 前失败时不会写入 `usage_logs`，而上游以 HTTP 200 建立 SSE 后再发送错误事件时，当前日志仍可能记录为 `status_code=200`，并且不会把错误事件写入 `error_message`。因此 Web 端“响应内容为空”不一定表示上游没有响应，可能是错误被记录在 `error_message`，或流式错误没有被完整落库。
+
 ## Git 规范
 
 ### Commit 格式
@@ -177,6 +201,6 @@ Type 类型:
 - **代理统一入口**: 所有代理 handler（chat/responses/messages/embeddings/images）统一调用 `handle_proxy_request`，不各自实现转发逻辑
 - **缓存共享**: `ProxyCache` 被 admin handler（channels、groups）和 proxy 层共享，管理操作后自动失效缓存
 - **模型反向索引**: `ProxyCache.model_index` 维护 model→channel_id 映射，加速模型路由查找
-- **API Key 轮询**: 使用 `AtomicU64` 计数器实现无锁 round-robin
+- **API Key 轮询**: 使用 `AtomicU64` 计数器实现无锁 round-robin；当前轮询粒度是“每次选中渠道发起请求”选择一个 key，不是在同一次请求失败后遍历该渠道的其他 key。上游失败重试会把整个 `channel_id` 加入排除列表，转向其他渠道；流式 SSE 建连成功后才出现的错误不会触发代理层重试。
 - **上游错误脱敏**: `sanitize_upstream_error` 截断并提取关键信息，避免泄露上游内部细节
 - **统计聚合对齐整点**: aggregator 使用 wall-clock aligned sleep，而非固定间隔
