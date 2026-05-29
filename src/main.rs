@@ -34,17 +34,19 @@ struct Cli {
     host: Option<String>,
 
     /// 日志级别
-    #[arg(short, long, default_value = "info")]
-    log_level: String,
+    #[arg(short, long)]
+    log_level: Option<String>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    init_logging(&cli.log_level)?;
-
     let config = AppConfig::load(&cli.config)?;
+
+    let log_level = cli.log_level.as_deref().unwrap_or(&config.logging.level);
+    let _guard = init_logging(log_level, &config.logging)?;
+
     info!("Configuration loaded from {:?}", cli.config);
 
     let config = apply_cli_overrides(config, &cli);
@@ -131,19 +133,75 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn init_logging(log_level: &str) -> Result<()> {
+fn init_logging(
+    log_level: &str,
+    logging_config: &config::LoggingConfig,
+) -> Result<Option<tracing_appender::non_blocking::WorkerGuard>> {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(log_level));
 
-    fmt()
-        .with_env_filter(filter)
-        .with_target(true)
-        .with_thread_ids(true)
-        .with_file(true)
-        .with_line_number(true)
-        .init();
+    let mut guard = None;
 
-    Ok(())
+    if logging_config.file {
+        let path = PathBuf::from(&logging_config.file_path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let file_appender = tracing_appender::rolling::never(
+            path.parent().unwrap_or_else(|| std::path::Path::new(".")),
+            path.file_name().unwrap_or_default(),
+        );
+        let (non_blocking, nb_guard) = tracing_appender::non_blocking(file_appender);
+        guard = Some(nb_guard);
+
+        match logging_config.format.as_str() {
+            "json" => {
+                fmt()
+                    .with_env_filter(filter)
+                    .with_target(true)
+                    .with_thread_ids(true)
+                    .with_file(true)
+                    .with_line_number(true)
+                    .json()
+                    .with_writer(non_blocking)
+                    .init();
+            }
+            _ => {
+                fmt()
+                    .with_env_filter(filter)
+                    .with_target(true)
+                    .with_thread_ids(true)
+                    .with_file(true)
+                    .with_line_number(true)
+                    .with_writer(non_blocking)
+                    .init();
+            }
+        }
+    } else {
+        match logging_config.format.as_str() {
+            "json" => {
+                fmt()
+                    .with_env_filter(filter)
+                    .with_target(true)
+                    .with_thread_ids(true)
+                    .with_file(true)
+                    .with_line_number(true)
+                    .json()
+                    .init();
+            }
+            _ => {
+                fmt()
+                    .with_env_filter(filter)
+                    .with_target(true)
+                    .with_thread_ids(true)
+                    .with_file(true)
+                    .with_line_number(true)
+                    .init();
+            }
+        }
+    }
+
+    Ok(guard)
 }
 
 fn apply_cli_overrides(mut config: AppConfig, cli: &Cli) -> AppConfig {
