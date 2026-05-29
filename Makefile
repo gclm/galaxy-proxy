@@ -1,6 +1,6 @@
 # Galaxy Proxy Makefile
 
-.PHONY: build run test clean fmt clippy release docker help frontend-build
+.PHONY: build run test clean fmt clippy release docker help frontend-build dev dev-stop
 
 # 默认目标
 all: build
@@ -9,13 +9,36 @@ all: build
 frontend-build:
 	cd frontend && pnpm install && pnpm build
 
-# 开发构建（包含前端）
+# 构建（包含前端）
 build: frontend-build
 	cargo build
 
-# 运行
-run:
+# ===== 开发模式：同时启动前后端 =====
+
+# 运行rust 后端
+dev-rust:
 	cargo run
+
+# 启动前端开发环境
+dev-frontend:
+	cd frontend && pnpm dev
+
+# 启动开发环境（后端 + 前端 dev server，Ctrl+C 停止全部）
+dev:
+	@echo "启动开发环境..."
+	@trap 'kill 0; exit 0' INT TERM; \
+	cargo run & \
+	cd frontend && npx vite; \
+	wait
+
+# 停止残留的开发进程
+dev-stop:
+	@lsof -ti :8080 2>/dev/null | xargs kill 2>/dev/null; \
+	lsof -ti :5173 2>/dev/null | xargs kill 2>/dev/null; \
+	lsof -ti :5174 2>/dev/null | xargs kill 2>/dev/null; \
+	echo "开发环境已停止"
+
+# ===== 测试 =====
 
 # 运行测试
 test:
@@ -83,6 +106,8 @@ help:
 	@echo "目标:"
 	@echo "  build          开发构建"
 	@echo "  run            运行服务"
+	@echo "  dev            启动开发环境（前后端同时运行，Ctrl+C 停止）"
+	@echo "  dev-stop       停止残留的开发进程"
 	@echo "  test           运行测试"
 	@echo "  fmt            格式化代码"
 	@echo "  clippy         代码检查"

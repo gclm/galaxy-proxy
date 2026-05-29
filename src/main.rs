@@ -42,32 +42,48 @@ struct Cli {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // 初始化日志
     init_logging(&cli.log_level)?;
 
-    // 加载配置
     let config = AppConfig::load(&cli.config)?;
     info!("Configuration loaded from {:?}", cli.config);
 
-    // 应用 CLI 覆盖
     let config = apply_cli_overrides(config, &cli);
 
-    // 初始化数据库
     let database = Database::new(&config.database_url()).await?;
     info!("Database initialized");
 
-    // 检查是否需要初始化 JWT 密钥
     let config = ensure_jwt_secret(config, &cli.config)?;
 
-    // 初始化成本计算器并加载定价数据
-    let cost_calculator = stats::cost::CostCalculator::new();
-    if let Err(e) = cost_calculator.load_local_pricing(database.pool()).await {
-        tracing::warn!("加载本地定价数据失败: {}", e);
+    // 初始化模型注册表：从 DB 加载，空则回退缓存文件
+    let cache_path = PathBuf::from(&config.pricing.cache_path);
+    let providers = config.pricing.providers.clone();
+    let model_registry = stats::model::ModelRegistry::new(database.pool().clone());
+
+    model_registry
+        .load_from_db()
+        .await
+        .map_err(|e| anyhow::anyhow!("加载 DB 模型信息失败: {}", e))?;
+
+    {
+        let model_count = model_registry.get_all_models().await.len();
+        if model_count == 0 {
+            info!("DB 无模型信息，尝试从缓存文件加载");
+            if let Err(e) = model_registry.load_from_cache(&cache_path).await {
+                tracing::warn!("加载缓存失败: {}", e);
+            }
+        }
     }
-    if let Err(e) = cost_calculator.fetch_remote_pricing().await {
-        tracing::warn!("获取远程定价数据失败: {}", e);
-    }
-    info!("Cost calculator initialized");
+
+    // 后台尝试远程刷新
+    let bg_registry = model_registry.clone();
+    let bg_providers = providers.clone();
+    tokio::spawn(async move {
+        if let Err(e) = bg_registry.fetch_remote_pricing(&cache_path, &bg_providers).await {
+            tracing::warn!("远程模型信息刷新失败: {}", e);
+        }
+    });
+
+    info!("Model registry initialized");
 
     // 启动后台调度器
     let lb_state = proxy::state::LoadBalancerState::new();
@@ -81,7 +97,17 @@ async fn main() -> Result<()> {
     aggregator.start();
     info!("Stats aggregator started");
 
-    // 创建路由（带排队配置）
+    // 模型信息定时刷新
+    let pricing_refresher = Arc::new(stats::pricing_refresher::PricingRefresher::new(
+        model_registry.clone(),
+        PathBuf::from(&config.pricing.cache_path),
+        config.pricing.providers.clone(),
+        config.pricing.refresh_interval_hours,
+    ));
+    pricing_refresher.start();
+    info!("Pricing refresher started");
+
+    // 创建路由
     let addr = config.server_addr();
     let jwt_secret = config.auth.jwt_secret.clone();
     let queuing = config.queuing.clone();
@@ -91,9 +117,10 @@ async fn main() -> Result<()> {
         &queuing,
         &addr,
         config,
-    ).await;
+        model_registry,
+    )
+    .await;
 
-    // 启动服务器
     info!("Starting server on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -102,7 +129,6 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// 初始化日志
 fn init_logging(log_level: &str) -> Result<()> {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(log_level));
@@ -118,7 +144,6 @@ fn init_logging(log_level: &str) -> Result<()> {
     Ok(())
 }
 
-/// 应用 CLI 参数覆盖配置
 fn apply_cli_overrides(mut config: AppConfig, cli: &Cli) -> AppConfig {
     if let Some(port) = cli.port {
         config.server.port = port;
@@ -129,7 +154,6 @@ fn apply_cli_overrides(mut config: AppConfig, cli: &Cli) -> AppConfig {
     config
 }
 
-/// 确保 JWT 密钥存在
 fn ensure_jwt_secret(mut config: AppConfig, config_path: &PathBuf) -> Result<AppConfig> {
     if config.auth.jwt_secret.is_empty() {
         use rand::Rng;
@@ -141,7 +165,6 @@ fn ensure_jwt_secret(mut config: AppConfig, config_path: &PathBuf) -> Result<App
 
         info!("Generated new JWT secret");
 
-        // 读取并更新配置文件
         let content = std::fs::read_to_string(config_path)?;
         let mut toml_value: toml::Value = toml::from_str(&content)?;
 

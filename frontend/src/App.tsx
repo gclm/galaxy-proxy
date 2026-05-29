@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from '@/stores/auth'
 import { getHealth } from '@/api/auth'
 import { Layout } from '@/components/layout'
-import { Login, Setup, Dashboard, Channels, Groups, ApiKeys, Stats, Settings, Logs } from '@/pages'
+import { Login, Setup, Dashboard, Channels, Groups, ApiKeys, Stats, Settings, Logs, Models, Playground } from '@/pages'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuthStore()
@@ -80,6 +80,8 @@ function App() {
           <Route path="api-keys" element={<ApiKeys />} />
           <Route path="stats" element={<Stats />} />
           <Route path="logs" element={<Logs />} />
+          <Route path="playground" element={<Playground />} />
+          <Route path="models" element={<Models />} />
           <Route path="settings" element={<Settings />} />
         </Route>
       </Routes>

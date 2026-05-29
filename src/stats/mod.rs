@@ -1,5 +1,6 @@
 pub mod aggregator;
-pub mod cost;
+pub mod model;
+pub mod pricing_refresher;
 pub mod recorder;
 
 use serde::{Deserialize, Serialize};

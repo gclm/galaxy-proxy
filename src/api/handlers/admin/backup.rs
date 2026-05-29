@@ -155,6 +155,59 @@ pub async fn import(
     Ok(Json(ApiResponse::success(result)))
 }
 
+/// 重置结果
+#[derive(Debug, Serialize)]
+pub struct ResetResult {
+    pub channels_deleted: u64,
+    pub groups_deleted: u64,
+    pub api_keys_deleted: u64,
+    pub settings_reset: u64,
+}
+
+/// 恢复出厂设置（删除渠道、分组、API Key、设置，保留用户和定价）
+pub async fn reset(
+    State(state): State<BackupState>,
+) -> Result<Json<ApiResponse<ResetResult>>, (StatusCode, Json<ApiError>)> {
+    let pool = &state.pool;
+
+    let groups_deleted = sqlx::query("DELETE FROM group_items")
+        .execute(pool)
+        .await
+        .map_err(|e| ApiError::internal_error(e.to_string()))?
+        .rows_affected();
+    let groups_deleted = groups_deleted
+        + sqlx::query("DELETE FROM groups")
+            .execute(pool)
+            .await
+            .map_err(|e| ApiError::internal_error(e.to_string()))?
+            .rows_affected();
+
+    let channels_deleted = sqlx::query("DELETE FROM channels")
+        .execute(pool)
+        .await
+        .map_err(|e| ApiError::internal_error(e.to_string()))?
+        .rows_affected();
+
+    let api_keys_deleted = sqlx::query("DELETE FROM api_keys")
+        .execute(pool)
+        .await
+        .map_err(|e| ApiError::internal_error(e.to_string()))?
+        .rows_affected();
+
+    let settings_reset = sqlx::query("DELETE FROM settings")
+        .execute(pool)
+        .await
+        .map_err(|e| ApiError::internal_error(e.to_string()))?
+        .rows_affected();
+
+    Ok(Json(ApiResponse::success(ResetResult {
+        channels_deleted,
+        groups_deleted,
+        api_keys_deleted,
+        settings_reset,
+    })))
+}
+
 // ── 数据读取 ──
 
 async fn fetch_channels(pool: &SqlitePool) -> Result<Vec<Channel>, (StatusCode, Json<ApiError>)> {

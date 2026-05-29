@@ -11,6 +11,8 @@ pub struct AppConfig {
     pub auth: AuthConfig,
     #[serde(default)]
     pub queuing: QueuingConfig,
+    #[serde(default)]
+    pub pricing: PricingTomlConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -70,12 +72,43 @@ fn default_queue_timeout_secs() -> u64 {
     30
 }
 
+/// 定价配置（config.toml）
+#[derive(Debug, Deserialize, Clone)]
+pub struct PricingTomlConfig {
+    /// 本地缓存文件路径（相对于工作目录）
+    #[serde(default = "default_pricing_cache_path")]
+    pub cache_path: String,
+    /// 远程刷新间隔（小时）
+    #[serde(default = "default_pricing_refresh_hours")]
+    pub refresh_interval_hours: u64,
+    /// 启用的 provider 白名单（空=全部导入）
+    #[serde(default)]
+    pub providers: Vec<String>,
+}
+
+impl Default for PricingTomlConfig {
+    fn default() -> Self {
+        Self {
+            cache_path: default_pricing_cache_path(),
+            refresh_interval_hours: default_pricing_refresh_hours(),
+            providers: Vec::new(),
+        }
+    }
+}
+
+fn default_pricing_cache_path() -> String {
+    "data/pricing_cache.json".to_string()
+}
+
+fn default_pricing_refresh_hours() -> u64 {
+    24
+}
+
 /// 运行时配置（从数据库加载）
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
     pub scheduler: SchedulerConfig,
     pub sticky_session: StickySessionConfig,
-    pub stats: StatsConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -109,18 +142,6 @@ impl Default for ScoreWeights {
 pub struct StickySessionConfig {
     pub enabled: bool,
     pub ttl_seconds: u64,
-}
-
-#[derive(Debug, Clone)]
-pub struct StatsConfig {
-    pub log_detail_mode: String,
-    pub cost: CostConfig,
-}
-
-#[derive(Debug, Clone)]
-pub struct CostConfig {
-    pub source: String,
-    pub refresh_interval_hours: u64,
 }
 
 impl AppConfig {
@@ -162,13 +183,6 @@ impl Default for RuntimeConfig {
             sticky_session: StickySessionConfig {
                 enabled: true,
                 ttl_seconds: 3600,
-            },
-            stats: StatsConfig {
-                log_detail_mode: "failures_only".to_string(),
-                cost: CostConfig {
-                    source: "models.dev".to_string(),
-                    refresh_interval_hours: 24,
-                },
             },
         }
     }

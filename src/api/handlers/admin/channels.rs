@@ -328,6 +328,30 @@ pub async fn update(
         updates.push("custom_headers = ?");
         values.push(serde_json::to_string(custom_headers).unwrap_or_default());
     }
+    if let Some(enabled) = &req.enabled {
+        updates.push("enabled = ?");
+        values.push(if *enabled { "1".to_string() } else { "0".to_string() });
+    }
+    if let Some(rate_limit_rpm) = &req.rate_limit_rpm {
+        updates.push("rate_limit_rpm = ?");
+        values.push(rate_limit_rpm.to_string());
+    }
+    if let Some(rate_limit_tpm) = &req.rate_limit_tpm {
+        updates.push("rate_limit_tpm = ?");
+        values.push(rate_limit_tpm.to_string());
+    }
+    if let Some(failure_threshold) = &req.failure_threshold {
+        updates.push("failure_threshold = ?");
+        values.push(failure_threshold.to_string());
+    }
+    if let Some(blacklist_minutes) = &req.blacklist_minutes {
+        updates.push("blacklist_minutes = ?");
+        values.push(blacklist_minutes.to_string());
+    }
+    if let Some(concurrency) = &req.concurrency {
+        updates.push("concurrency = ?");
+        values.push(concurrency.to_string());
+    }
 
     if updates.is_empty() {
         return Err(ApiError::bad_request("没有需要更新的字段"));

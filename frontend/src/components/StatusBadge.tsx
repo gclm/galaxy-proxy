@@ -2,13 +2,16 @@ export function StatusBadge({ enabled, onClick }: { enabled: boolean; onClick: (
   return (
     <button
       onClick={onClick}
-      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors cursor-pointer ${
-        enabled
-          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-          : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+      title={enabled ? '点击禁用' : '点击启用'}
+      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
+        enabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
       }`}
     >
-      {enabled ? '启用' : '禁用'}
+      <span
+        className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+          enabled ? 'translate-x-4' : 'translate-x-0.5'
+        }`}
+      />
     </button>
   )
 }

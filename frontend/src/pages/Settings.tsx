@@ -1,16 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { authApi, settingsApi, backupApi } from '@/api'
-import type { SettingItem, InfraConfig, ImportResult } from '@/api/backup'
+import type { SettingItem, InfraConfig, ImportResult, ResetResult } from '@/api/backup'
 import { Button } from '@/components/ui/button'
 import { useAuthStore } from '@/stores/auth'
-import { User, Shield, Settings2, TrendingUp, Activity, Sliders, Server, Database, Globe } from 'lucide-react'
+import { User, Shield, TrendingUp, Sliders, Server, Database, Globe } from 'lucide-react'
 
 const tabs = [
   { id: 'account', label: '账户安全', icon: Shield },
   { id: 'scheduler', label: '调度策略', icon: Sliders },
   { id: 'sticky-session', label: '粘性会话', icon: TrendingUp },
-  { id: 'stats', label: '统计日志', icon: Activity },
-  { id: 'pricing', label: '成本定价', icon: Settings2 },
   { id: 'backup', label: '数据备份', icon: Database },
   { id: 'proxy', label: '上游代理', icon: Globe },
   { id: 'infra', label: '基础配置', icon: Server },
@@ -42,19 +40,6 @@ const fieldDefs: Record<string, FieldDef[]> = {
     { key: 'sticky_session.enabled', label: '启用粘性会话', description: '同一 session_hash 路由到同一上游', type: 'switch' },
     { key: 'sticky_session.ttl_seconds', label: '会话保持时间', type: 'number', min: 60, max: 86400, unit: '秒' },
   ],
-  stats: [
-    { key: 'stats.log_detail_mode', label: '日志模式', type: 'select', options: [
-      { value: 'all', label: '记录全部' },
-      { value: 'failures_only', label: '仅失败' },
-      { value: 'none', label: '关闭' },
-    ] },
-    { key: 'stats.cost.source', label: '定价数据源', type: 'select', options: [
-      { value: 'models.dev', label: 'models.dev' },
-      { value: 'local', label: '本地数据库' },
-    ] },
-    { key: 'stats.cost.refresh_interval_hours', label: '刷新间隔', type: 'number', min: 1, max: 168, unit: '小时' },
-  ],
-  pricing: [],
   proxy: [
     { key: 'proxy.enabled', label: '启用上游代理', description: '通过代理服务器转发请求到上游 API', type: 'switch' },
     { key: 'proxy.url', label: '代理地址', description: '如 http://127.0.0.1:7890', type: 'text' },
@@ -72,9 +57,8 @@ export function Settings() {
     settingsApi.infra().then(setInfra).catch(() => {})
   }, [])
 
-  const settingMap = Object.fromEntries(settings.map((s) => [s.key, s]))
+  const settingMap = useMemo(() => Object.fromEntries(settings.map((s) => [s.key, s])), [settings])
 
-  // score_weights 是 JSON，拆成独立字段
   const getWeightValue = (weightKey: string): string => {
     const weightsStr = settingMap['scheduler.score_weights']?.value
     if (!weightsStr) return '1.0'
@@ -140,14 +124,6 @@ export function Settings() {
         )}
         {activeTab === 'sticky-session' && (
           <FieldSetTab category="sticky_session" settingMap={settingMap} onUpdate={handleUpdate} />
-        )}
-        {activeTab === 'stats' && (
-          <FieldSetTab category="stats" settingMap={settingMap} onUpdate={handleUpdate} />
-        )}
-        {activeTab === 'pricing' && (
-          <section className="rounded-2xl border bg-card p-8 text-center">
-            <p className="text-sm text-muted-foreground">定价配置暂无可用数据</p>
-          </section>
         )}
         {activeTab === 'backup' && <BackupTab />}
         {activeTab === 'proxy' && (
@@ -286,6 +262,20 @@ function SchedulerTab({
 
 /* ── 通用字段标签页（粘性会话、统计日志） ── */
 
+function renderFieldControl(field: FieldDef, value: string, onUpdate: (key: string, value: string) => Promise<void>) {
+  const props = { value, onSave: (v: string) => onUpdate(field.key, v) }
+  switch (field.type) {
+    case 'switch':
+      return <SwitchControl value={value === 'true'} onSave={(v) => onUpdate(field.key, v ? 'true' : 'false')} />
+    case 'select':
+      return field.options ? <SelectControl {...props} options={field.options} /> : null
+    case 'text':
+      return <InlineTextEdit {...props} />
+    default:
+      return <InlineNumberEdit {...props} min={field.min} max={field.max} unit={field.unit} />
+  }
+}
+
 function FieldSetTab({
   category,
   settingMap,
@@ -309,31 +299,7 @@ function FieldSetTab({
     <section className="rounded-2xl border bg-card divide-y">
       {fields.map((field) => (
         <SettingRow key={field.key} label={field.label} description={field.description}>
-          {field.type === 'switch' ? (
-            <SwitchControl
-              value={settingMap[field.key]?.value === 'true'}
-              onSave={(v) => onUpdate(field.key, v ? 'true' : 'false')}
-            />
-          ) : field.type === 'select' && field.options ? (
-            <SelectControl
-              value={settingMap[field.key]?.value ?? ''}
-              options={field.options}
-              onSave={(v) => onUpdate(field.key, v)}
-            />
-          ) : field.type === 'text' ? (
-            <InlineTextEdit
-              value={settingMap[field.key]?.value ?? ''}
-              onSave={(v) => onUpdate(field.key, v)}
-            />
-          ) : (
-            <InlineNumberEdit
-              value={settingMap[field.key]?.value ?? ''}
-              onSave={(v) => onUpdate(field.key, v)}
-              min={field.min}
-              max={field.max}
-              unit={field.unit}
-            />
-          )}
+          {renderFieldControl(field, settingMap[field.key]?.value ?? '', onUpdate)}
         </SettingRow>
       ))}
     </section>
@@ -569,6 +535,9 @@ function BackupTab() {
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
   const [importError, setImportError] = useState('')
+  const [resetting, setResetting] = useState(false)
+  const [resetResult, setResetResult] = useState<ResetResult | null>(null)
+  const [showResetConfirm, setShowResetConfirm] = useState(false)
 
   const handleExport = async () => {
     setExporting(true)
@@ -606,6 +575,19 @@ function BackupTab() {
     } finally {
       setImporting(false)
       e.target.value = ''
+    }
+  }
+
+  const handleReset = async () => {
+    setResetting(true)
+    setShowResetConfirm(false)
+    try {
+      const result = await backupApi.reset()
+      setResetResult(result)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '重置失败')
+    } finally {
+      setResetting(false)
     }
   }
 
@@ -670,6 +652,42 @@ function BackupTab() {
                 ))}
               </div>
             )}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-2xl border border-destructive/30 bg-card p-5 space-y-4">
+        <h2 className="text-sm font-medium text-destructive flex items-center gap-2">
+          <Database className="h-4 w-4" />
+          恢复出厂设置
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          清空所有渠道、分组、API Key 和设置数据，恢复为出厂状态。管理员账户和定价数据不受影响。
+        </p>
+        <p className="text-xs text-amber-600">
+          此操作不可撤销，建议先导出备份。
+        </p>
+        {showResetConfirm ? (
+          <div className="flex items-center gap-3">
+            <Button onClick={handleReset} variant="destructive" disabled={resetting}>
+              {resetting ? '重置中...' : '确认重置'}
+            </Button>
+            <Button variant="outline" onClick={() => setShowResetConfirm(false)}>取消</Button>
+          </div>
+        ) : (
+          <Button variant="destructive" onClick={() => { setShowResetConfirm(true); setResetResult(null) }}>
+            恢复出厂设置
+          </Button>
+        )}
+        {resetResult && (
+          <div className="rounded-lg bg-muted p-4 text-sm space-y-2">
+            <p className="font-medium text-destructive">已重置</p>
+            <div className="grid grid-cols-2 gap-2 text-muted-foreground">
+              <span>删除渠道: {resetResult.channels_deleted}</span>
+              <span>删除分组: {resetResult.groups_deleted}</span>
+              <span>删除 API Key: {resetResult.api_keys_deleted}</span>
+              <span>重置设置: {resetResult.settings_reset}</span>
+            </div>
           </div>
         )}
       </section>

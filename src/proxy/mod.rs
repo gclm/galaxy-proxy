@@ -5,7 +5,7 @@ use self::state::LoadBalancerState;
 use crate::api::handlers::admin::channels::{CustomHeader, EndpointConfig, EndpointType};
 use crate::protocol::inbound::Inbound;
 use crate::protocol::outbound::Outbound;
-use crate::stats::cost::CostCalculator;
+use crate::stats::model::ModelRegistry;
 use crate::stats::recorder::StatsRecorder;
 use axum::body::Bytes;
 use axum::http::{HeaderMap, StatusCode};
@@ -143,7 +143,7 @@ pub struct ProxyState {
     pub http_client: reqwest::Client,
     pub lb_state: LoadBalancerState,
     pub stats_recorder: StatsRecorder,
-    pub cost_calculator: CostCalculator,
+    pub model_registry: ModelRegistry,
     pub cache: ProxyCache,
     pub queue: Option<RequestQueue>,
 }
@@ -191,7 +191,7 @@ pub struct ProxySuccess {
 }
 
 impl ProxyState {
-    pub async fn new(pool: SqlitePool) -> Self {
+    pub async fn new(pool: SqlitePool, model_registry: ModelRegistry) -> Self {
         let proxy_enabled: bool = sqlx::query_scalar::<_, String>(
             "SELECT value FROM settings WHERE key = 'proxy.enabled'",
         )
@@ -239,7 +239,7 @@ impl ProxyState {
 
         Self {
             stats_recorder: StatsRecorder::new(pool.clone()),
-            cost_calculator: CostCalculator::new(),
+            model_registry,
             cache: ProxyCache::new(),
             queue: None,
             pool,
@@ -827,6 +827,17 @@ async fn execute_proxy_request(
             } else {
                 (0, 0, 0, 0)
             };
+        let cost = if input_tokens > 0 || output_tokens > 0 {
+            Some(state.model_registry.calculate_cost(
+                &prepared.target_model,
+                input_tokens,
+                output_tokens,
+                cache_read,
+                cache_creation,
+            ).await)
+        } else {
+            None
+        };
         let record = crate::stats::recorder::RequestRecord {
             api_key_id: api_key_id.map(|s| s.to_string()),
             channel_id: Some(prepared.channel_id.clone()),
@@ -834,7 +845,7 @@ async fn execute_proxy_request(
             requested_model: prepared.model.clone(),
             actual_model: Some(prepared.target_model.clone()),
             input_tokens, output_tokens, cache_read_tokens: cache_read, cache_creation_tokens: cache_creation,
-            cost: None,
+            cost,
             latency_ms: Some(latency_ms as i32),
             status_code: Some(status_u16 as i32),
             error_message: if !status.is_success() { Some(response_body.clone()) } else { None },
@@ -1086,6 +1097,18 @@ async fn execute_proxy_stream(
                 .map(|u| extract_usage(&u, &upstream_endpoint_clone))
                 .unwrap_or((0, 0, 0, 0));
 
+        let cost = if input_tokens > 0 || output_tokens > 0 {
+            Some(state_clone.model_registry.calculate_cost(
+                &target_model_clone,
+                input_tokens,
+                output_tokens,
+                cache_read,
+                cache_creation,
+            ).await)
+        } else {
+            None
+        };
+
         let record = crate::stats::recorder::RequestRecord {
             api_key_id: api_key_id_clone,
             channel_id: Some(channel_id_clone),
@@ -1096,7 +1119,7 @@ async fn execute_proxy_stream(
             output_tokens,
             cache_read_tokens: cache_read,
             cache_creation_tokens: cache_creation,
-            cost: None,
+            cost,
             latency_ms: Some(latency_ms as i32),
             status_code: Some(200),
             error_message: None,

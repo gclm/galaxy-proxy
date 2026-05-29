@@ -1,8 +1,13 @@
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use sqlx::SqlitePool;
 
+use crate::api::middleware::ApiKeyAuth;
+
 /// 获取可用模型列表
-pub async fn list(State(pool): State<SqlitePool>) -> impl IntoResponse {
+pub async fn list(
+    _auth: ApiKeyAuth,
+    State(pool): State<SqlitePool>,
+) -> impl IntoResponse {
     // 获取所有启用的分组
     let groups = sqlx::query_scalar::<_, String>("SELECT name FROM groups WHERE enabled = 1")
         .fetch_all(&pool)

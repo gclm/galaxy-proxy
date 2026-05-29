@@ -6,6 +6,8 @@ import {
   Key,
   BarChart3,
   ScrollText,
+  FlaskConical,
+  Box,
   Settings,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -40,6 +42,16 @@ const navItems = [
     title: '请求日志',
     href: '/logs',
     icon: ScrollText,
+  },
+  {
+    title: '操练场',
+    href: '/playground',
+    icon: FlaskConical,
+  },
+  {
+    title: '模型信息',
+    href: '/models',
+    icon: Box,
   },
 ]
 

@@ -4,7 +4,7 @@ pub mod backup;
 pub mod channels;
 pub mod fetch_models;
 pub mod groups;
-pub mod pricing;
+pub mod model_info;
 pub mod settings;
 pub mod stats;
 pub mod system_info;

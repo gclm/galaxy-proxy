@@ -16,7 +16,7 @@ use crate::api::handlers::admin::backup::{self, BackupState};
 use crate::api::handlers::admin::channels::{self, ChannelState};
 use crate::api::handlers::admin::fetch_models::{self, FetchModelsState};
 use crate::api::handlers::admin::groups::{self, GroupState};
-use crate::api::handlers::admin::pricing::{self, PricingState};
+use crate::api::handlers::admin::model_info::{self, ModelInfoState};
 use crate::api::handlers::admin::settings::{self, SettingsState};
 use crate::api::handlers::admin::stats::{self, StatsApiState};
 use crate::api::handlers::admin::system_info::{self, SystemInfoState};
@@ -28,7 +28,7 @@ use crate::static_assets;
 use crate::stats::StatsState;
 
 /// 创建应用路由
-pub async fn create_router(pool: SqlitePool, jwt_secret: String, queuing: &QueuingConfig, _server_addr: &str, config: AppConfig) -> Router {
+pub async fn create_router(pool: SqlitePool, jwt_secret: String, queuing: &QueuingConfig, _server_addr: &str, config: AppConfig, model_registry: crate::stats::model::ModelRegistry) -> Router {
     let auth_state = AuthState {
         pool: pool.clone(),
         jwt_service: crate::auth::JwtService::new(&jwt_secret, 24),
@@ -44,8 +44,8 @@ pub async fn create_router(pool: SqlitePool, jwt_secret: String, queuing: &Queui
         stats: StatsState::new(pool.clone()),
     };
 
-    let pricing_state = PricingState {
-        cost_calculator: crate::stats::cost::CostCalculator::new(),
+    let model_info_state = ModelInfoState {
+        model_registry: model_registry.clone(),
     };
 
     let fetch_models_state = FetchModelsState {
@@ -76,9 +76,9 @@ pub async fn create_router(pool: SqlitePool, jwt_secret: String, queuing: &Queui
     let backup_state = BackupState { pool: pool.clone() };
 
     let proxy_state = if queuing.enabled {
-        ProxyState::new(pool.clone()).await.with_queue(queuing.max_queue_size, queuing.queue_timeout_secs)
+        ProxyState::new(pool.clone(), model_registry.clone()).await.with_queue(queuing.max_queue_size, queuing.queue_timeout_secs)
     } else {
-        ProxyState::new(pool.clone()).await
+        ProxyState::new(pool.clone(), model_registry.clone()).await
     };
 
     Router::new()
@@ -103,7 +103,7 @@ pub async fn create_router(pool: SqlitePool, jwt_secret: String, queuing: &Queui
         // 管理 API 路由 - 统计
         .nest("/api/v1/admin/stats", stats_routes(stats_state))
         // 管理 API 路由 - 定价
-        .nest("/api/v1/admin/pricing", pricing_routes(pricing_state))
+        .nest("/api/v1/admin/models/info", model_info_routes(model_info_state))
         // 管理 API 路由 - 系统信息
         .nest("/api/v1/admin", system_info_routes(system_info_state))
         // 管理 API 路由 - 设置
@@ -254,11 +254,11 @@ fn stats_routes(stats_state: StatsApiState) -> Router {
 }
 
 /// 定价路由
-fn pricing_routes(pricing_state: PricingState) -> Router {
+fn model_info_routes(model_info_state: ModelInfoState) -> Router {
     Router::new()
-        .route("/", get(pricing::list).put(pricing::update))
-        .route("/{model}", get(pricing::get))
-        .with_state(pricing_state)
+        .route("/", get(model_info::list).put(model_info::update))
+        .route("/{model}", get(model_info::get))
+        .with_state(model_info_state)
 }
 
 /// 系统信息路由
@@ -282,5 +282,6 @@ fn backup_routes(backup_state: BackupState) -> Router {
     Router::new()
         .route("/export", get(backup::export))
         .route("/import", post(backup::import))
+        .route("/reset", post(backup::reset))
         .with_state(backup_state)
 }

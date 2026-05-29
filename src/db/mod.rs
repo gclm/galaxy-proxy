@@ -5,7 +5,7 @@ use std::path::Path;
 use tracing::info;
 
 use crate::config::{
-    CostConfig, RuntimeConfig, SchedulerConfig, ScoreWeights, StatsConfig, StickySessionConfig,
+    RuntimeConfig, SchedulerConfig, ScoreWeights, StickySessionConfig,
 };
 
 /// 设置项（数据库行）
@@ -191,21 +191,6 @@ impl Database {
             .and_then(|v| v.parse().ok())
             .unwrap_or(3600);
 
-        let log_detail_mode = settings_map
-            .get("stats.log_detail_mode")
-            .cloned()
-            .unwrap_or_else(|| "failures_only".to_string());
-
-        let cost_source = settings_map
-            .get("stats.cost.source")
-            .cloned()
-            .unwrap_or_else(|| "models.dev".to_string());
-
-        let cost_refresh_hours = settings_map
-            .get("stats.cost.refresh_interval_hours")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(24);
-
         RuntimeConfig {
             scheduler: SchedulerConfig {
                 top_k,
@@ -214,13 +199,6 @@ impl Database {
             sticky_session: StickySessionConfig {
                 enabled: sticky_enabled,
                 ttl_seconds: sticky_ttl,
-            },
-            stats: StatsConfig {
-                log_detail_mode,
-                cost: CostConfig {
-                    source: cost_source,
-                    refresh_interval_hours: cost_refresh_hours,
-                },
             },
         }
     }
@@ -235,9 +213,21 @@ struct Migration {
 
 /// 获取所有迁移
 fn get_migrations() -> Vec<Migration> {
-    vec![Migration {
-        version: 0,
-        name: "initial_schema",
-        sql: include_str!("schema.sql"),
-    }]
+    vec![
+        Migration {
+            version: 0,
+            name: "initial_schema",
+            sql: include_str!("schema.sql"),
+        },
+        Migration {
+            version: 1,
+            name: "remove_stats_and_pricing_settings",
+            sql: "DELETE FROM settings WHERE key IN ('stats.log_detail_mode', 'stats.cost.source', 'stats.cost.refresh_interval_hours');",
+        },
+        Migration {
+            version: 2,
+            name: "replace_model_pricing_with_model_info",
+            sql: "DROP TABLE IF EXISTS model_pricing;",
+        },
+    ]
 }

@@ -48,8 +48,17 @@ export interface ImportResult {
   errors: string[]
 }
 
+export interface ResetResult {
+  channels_deleted: number
+  groups_deleted: number
+  api_keys_deleted: number
+  settings_reset: number
+}
+
 export const backupApi = {
   export: () => apiClient.get<BackupFile>('/backup/export'),
 
   import: (data: BackupFile) => apiClient.post<ImportResult>('/backup/import', data),
+
+  reset: () => apiClient.post<ResetResult>('/backup/reset'),
 }

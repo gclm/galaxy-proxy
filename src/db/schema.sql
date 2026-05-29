@@ -63,15 +63,27 @@ CREATE TABLE IF NOT EXISTS group_items (
     UNIQUE(group_id, channel_id, model_name)
 );
 
--- 模型定价
-CREATE TABLE IF NOT EXISTS model_pricing (
+-- 模型信息（定价 + 元数据）
+CREATE TABLE IF NOT EXISTS model_info (
     id TEXT PRIMARY KEY,
     model TEXT NOT NULL UNIQUE,
-    input_per_million REAL NOT NULL,
-    output_per_million REAL NOT NULL,
-    cache_read_per_million REAL,
-    cache_creation_per_million REAL,
-    source TEXT NOT NULL DEFAULT 'manual',
+    provider TEXT NOT NULL DEFAULT '',
+    mode TEXT NOT NULL DEFAULT 'chat',
+    input_price REAL,
+    output_price REAL,
+    cache_read_price REAL,
+    cache_creation_price REAL,
+    max_input_tokens INTEGER,
+    max_output_tokens INTEGER,
+    supports_function_calling BOOLEAN,
+    supports_reasoning BOOLEAN,
+    supports_vision BOOLEAN,
+    supports_pdf_input BOOLEAN,
+    supports_prompt_caching BOOLEAN,
+    supports_system_messages BOOLEAN,
+    supports_tool_choice BOOLEAN,
+    source TEXT NOT NULL DEFAULT 'remote',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -144,8 +156,5 @@ INSERT OR IGNORE INTO settings (key, category, value, description) VALUES
     ('scheduler.score_weights', 'scheduler', '{"priority":1.0,"load":1.0,"queue":0.7,"error_rate":0.8,"ttft":0.5}', '评分权重'),
     ('sticky_session.enabled', 'sticky_session', 'true', '是否启用粘性会话'),
     ('sticky_session.ttl_seconds', 'sticky_session', '3600', '会话保持时间（秒）'),
-    ('stats.log_detail_mode', 'stats', 'failures_only', '日志模式：all/failures_only/none'),
-    ('stats.cost.source', 'stats', 'models.dev', '成本数据源'),
-    ('stats.cost.refresh_interval_hours', 'stats', '24', '成本数据刷新间隔（小时）'),
     ('proxy.enabled', 'proxy', 'false', '是否启用上游代理'),
     ('proxy.url', 'proxy', '', '代理地址（如 http://127.0.0.1:7890）');
