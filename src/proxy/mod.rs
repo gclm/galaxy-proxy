@@ -679,6 +679,7 @@ impl ProxyState {
     }
 
     /// 选择 API Key（原子计数器轮询）
+    #[allow(dead_code)]
     pub fn select_api_key(&self, channel: &ChannelInfo) -> String {
         if channel.api_keys.is_empty() {
             return String::new();
@@ -687,6 +688,22 @@ impl ProxyState {
         let idx =
             self.key_counter.fetch_add(1, Ordering::Relaxed) as usize % channel.api_keys.len();
         channel.api_keys[idx].clone()
+    }
+
+    /// 生成一次请求内的同渠道 Key 尝试序列。
+    ///
+    /// 起点仍由全局 round-robin 决定；同一次请求失败时，按渠道内 Key 顺序继续兜底。
+    pub fn api_key_attempts(&self, channel: &ChannelInfo) -> Vec<String> {
+        if channel.api_keys.is_empty() {
+            return vec![String::new()];
+        }
+
+        let start =
+            self.key_counter.fetch_add(1, Ordering::Relaxed) as usize % channel.api_keys.len();
+
+        (0..channel.api_keys.len())
+            .map(|offset| channel.api_keys[(start + offset) % channel.api_keys.len()].clone())
+            .collect()
     }
 }
 
@@ -820,11 +837,11 @@ struct PreparedProxyRequest {
 
 /// 准备代理请求（共享逻辑）
 async fn prepare_proxy_request(
-    state: &ProxyState,
     headers: &HeaderMap,
     body: &serde_json::Value,
     client_endpoint: &EndpointType,
     selection: &SelectionResult,
+    api_key: &str,
 ) -> Result<PreparedProxyRequest, ProxyError> {
     let model = body["model"].as_str().unwrap_or("unknown").to_string();
     let upstream_endpoint = selection.endpoint.endpoint_type.clone();
@@ -846,7 +863,6 @@ async fn prepare_proxy_request(
         serde_json::to_vec(body).map_err(|e| ProxyError::TransformError(e.to_string()))?
     };
 
-    let api_key = state.select_api_key(&selection.channel);
     let mut reqwest_headers = reqwest::header::HeaderMap::new();
     reqwest_headers.insert("Content-Type", "application/json".parse().unwrap());
 
@@ -897,12 +913,14 @@ async fn prepare_proxy_request(
 async fn execute_proxy_request(
     state: &ProxyState,
     api_key_id: Option<&str>,
+    upstream_api_key: &str,
     headers: &HeaderMap,
     body: &serde_json::Value,
     client_endpoint: &EndpointType,
     selection: &SelectionResult,
 ) -> Result<ProxySuccess, ProxyError> {
-    let prepared = prepare_proxy_request(state, headers, body, client_endpoint, selection).await?;
+    let prepared =
+        prepare_proxy_request(headers, body, client_endpoint, selection, upstream_api_key).await?;
     let start_time = std::time::Instant::now();
 
     let response = state
@@ -1043,33 +1061,52 @@ pub async fn proxy_request(
         let selection =
             select_channel_for_proxy(state, headers, body, client_endpoint, &exclude_ids).await?;
         let channel_id = selection.channel.id.clone();
+        let api_key_attempts = state.api_key_attempts(&selection.channel);
 
-        match execute_proxy_request(
-            state,
-            api_key_id,
-            headers,
-            body,
-            client_endpoint,
-            &selection,
-        )
-        .await
-        {
-            Ok(result) => return Ok(result),
-            Err(ProxyError::UpstreamError { status, body }) => {
-                tracing::warn!(
-                    "请求失败(第{}次), channel={}, status={}, 排除后重试",
-                    attempt + 1,
-                    channel_id,
-                    status
-                );
-                state
-                    .lb_state
-                    .record_failure(&channel_id, status.is_server_error())
-                    .await;
-                exclude_ids.push(channel_id);
-                last_error = Some(ProxyError::UpstreamError { status, body });
+        for (key_idx, upstream_api_key) in api_key_attempts.iter().enumerate() {
+            match execute_proxy_request(
+                state,
+                api_key_id,
+                upstream_api_key,
+                headers,
+                body,
+                client_endpoint,
+                &selection,
+            )
+            .await
+            {
+                Ok(result) => return Ok(result),
+                Err(ProxyError::UpstreamError { status, body }) => {
+                    let can_try_next_key = key_idx + 1 < api_key_attempts.len()
+                        && is_key_retryable_upstream_error(status, &body);
+
+                    if can_try_next_key {
+                        tracing::warn!(
+                            "请求失败(第{}次), channel={}, status={}, 尝试同渠道下一个 key",
+                            attempt + 1,
+                            channel_id,
+                            status
+                        );
+                        last_error = Some(ProxyError::UpstreamError { status, body });
+                        continue;
+                    }
+
+                    tracing::warn!(
+                        "请求失败(第{}次), channel={}, status={}, 排除后重试",
+                        attempt + 1,
+                        channel_id,
+                        status
+                    );
+                    state
+                        .lb_state
+                        .record_failure(&channel_id, status.is_server_error())
+                        .await;
+                    exclude_ids.push(channel_id);
+                    last_error = Some(ProxyError::UpstreamError { status, body });
+                    break;
+                }
+                Err(e) => return Err(e),
             }
-            Err(e) => return Err(e),
         }
     }
 
@@ -1085,6 +1122,7 @@ pub async fn proxy_request(
 async fn execute_proxy_stream(
     state: &ProxyState,
     api_key_id: Option<&str>,
+    upstream_api_key: &str,
     headers: &HeaderMap,
     body: &serde_json::Value,
     client_endpoint: &EndpointType,
@@ -1103,7 +1141,8 @@ async fn execute_proxy_stream(
     ),
     ProxyError,
 > {
-    let prepared = prepare_proxy_request(state, headers, body, client_endpoint, selection).await?;
+    let prepared =
+        prepare_proxy_request(headers, body, client_endpoint, selection, upstream_api_key).await?;
     let start_time = std::time::Instant::now();
 
     let response = state
@@ -1153,8 +1192,68 @@ async fn execute_proxy_stream(
         });
     }
 
-    let upstream_stream = response.bytes_stream();
     use futures::StreamExt;
+    let mut upstream_stream = response.bytes_stream();
+
+    let mut initial_buffer = Vec::new();
+    while let Some(chunk) = upstream_stream.next().await {
+        match chunk {
+            Ok(bytes) => {
+                initial_buffer.extend_from_slice(&bytes);
+                if find_sse_boundary(&initial_buffer).is_some() || initial_buffer.len() >= 64 * 1024
+                {
+                    break;
+                }
+            }
+            Err(e) => return Err(ProxyError::RequestError(e.to_string())),
+        }
+    }
+
+    if let Some(event_end) = find_sse_boundary(&initial_buffer)
+        && let Ok(text) = std::str::from_utf8(&initial_buffer[..event_end])
+        && let Some(error) = extract_error_from_sse(text, &prepared.upstream_endpoint)
+    {
+        let latency_ms = start_time.elapsed().as_millis() as i64;
+        let request_content = serde_json::to_string(&body).ok();
+        let sanitized_error = sanitize_upstream_error(&error);
+
+        let record = crate::stats::recorder::RequestRecord {
+            api_key_id: api_key_id.map(|s| s.to_string()),
+            channel_id: Some(prepared.channel_id.clone()),
+            group_id: None,
+            requested_model: prepared.model.clone(),
+            actual_model: Some(prepared.target_model.clone()),
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            cost: None,
+            latency_ms: Some(latency_ms as i32),
+            status_code: Some(StatusCode::BAD_GATEWAY.as_u16() as i32),
+            error_message: Some(sanitized_error),
+            endpoint_type: Some(prepared.upstream_endpoint.as_str().to_string()),
+            request_type: if prepared.needs_conversion {
+                "conversion".to_string()
+            } else {
+                "passthrough".to_string()
+            },
+            request_content,
+            response_content: Some(error.clone()),
+            is_stream: true,
+        };
+        let _ = state.stats_recorder.record_request(record).await;
+
+        return Err(ProxyError::UpstreamError {
+            status: StatusCode::BAD_GATEWAY,
+            body: error,
+        });
+    }
+
+    let upstream_stream = futures::stream::iter(
+        (!initial_buffer.is_empty())
+            .then(|| Ok::<Bytes, reqwest::Error>(Bytes::from(initial_buffer))),
+    )
+    .chain(upstream_stream);
 
     let state_clone = state.clone();
     let channel_id_clone = prepared.channel_id.clone();
@@ -1404,37 +1503,56 @@ pub async fn proxy_stream(
         let selection =
             select_channel_for_proxy(state, headers, body, client_endpoint, &exclude_ids).await?;
         let channel_id = selection.channel.id.clone();
+        let api_key_attempts = state.api_key_attempts(&selection.channel);
 
-        match execute_proxy_stream(
-            state,
-            api_key_id,
-            headers,
-            body,
-            client_endpoint,
-            &selection,
-        )
-        .await
-        {
-            Ok(result) => {
-                // 流式连接成功，释放 permit（流式会持续很长时间，不应占用队列位置）
-                drop(permit);
-                return Ok(result);
+        for (key_idx, upstream_api_key) in api_key_attempts.iter().enumerate() {
+            match execute_proxy_stream(
+                state,
+                api_key_id,
+                upstream_api_key,
+                headers,
+                body,
+                client_endpoint,
+                &selection,
+            )
+            .await
+            {
+                Ok(result) => {
+                    // 流式连接成功，释放 permit（流式会持续很长时间，不应占用队列位置）
+                    drop(permit);
+                    return Ok(result);
+                }
+                Err(ProxyError::UpstreamError { status, body }) => {
+                    let can_try_next_key = key_idx + 1 < api_key_attempts.len()
+                        && is_key_retryable_upstream_error(status, &body);
+
+                    if can_try_next_key {
+                        tracing::warn!(
+                            "流式请求失败(第{}次), channel={}, status={}, 尝试同渠道下一个 key",
+                            attempt + 1,
+                            channel_id,
+                            status
+                        );
+                        last_error = Some(ProxyError::UpstreamError { status, body });
+                        continue;
+                    }
+
+                    tracing::warn!(
+                        "流式请求失败(第{}次), channel={}, status={}, 排除后重试",
+                        attempt + 1,
+                        channel_id,
+                        status
+                    );
+                    state
+                        .lb_state
+                        .record_failure(&channel_id, status.is_server_error())
+                        .await;
+                    exclude_ids.push(channel_id);
+                    last_error = Some(ProxyError::UpstreamError { status, body });
+                    break;
+                }
+                Err(e) => return Err(e),
             }
-            Err(ProxyError::UpstreamError { status, body }) => {
-                tracing::warn!(
-                    "流式请求失败(第{}次), channel={}, status={}, 排除后重试",
-                    attempt + 1,
-                    channel_id,
-                    status
-                );
-                state
-                    .lb_state
-                    .record_failure(&channel_id, status.is_server_error())
-                    .await;
-                exclude_ids.push(channel_id);
-                last_error = Some(ProxyError::UpstreamError { status, body });
-            }
-            Err(e) => return Err(e),
         }
     }
 
@@ -1574,6 +1692,33 @@ fn sanitize_upstream_error(body: &str) -> String {
     }
 
     truncated
+}
+
+fn is_key_retryable_upstream_error(status: StatusCode, body: &str) -> bool {
+    if matches!(
+        status,
+        StatusCode::UNAUTHORIZED | StatusCode::PAYMENT_REQUIRED | StatusCode::TOO_MANY_REQUESTS
+    ) {
+        return true;
+    }
+
+    let lower = sanitize_upstream_error(body).to_ascii_lowercase();
+    [
+        "余额不足",
+        "无可用资源包",
+        "insufficient_quota",
+        "quota exceeded",
+        "resource exhausted",
+        "credit balance",
+        "billing",
+        "rate limit",
+        "invalid api key",
+        "incorrect api key",
+        "unauthorized",
+        "authentication",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 /// 查找 SSE 事件边界（\n\n 或 \r\n\r\n）
@@ -1849,6 +1994,34 @@ data: {"type":"response.failed","response":{"status":"failed"},"error":{"message
         let message = sanitize_upstream_error(r#"{"error":"plain upstream error"}"#);
 
         assert_eq!(message, "plain upstream error");
+    }
+
+    #[test]
+    fn key_retryable_error_matches_status_and_quota_body() {
+        assert!(is_key_retryable_upstream_error(
+            StatusCode::UNAUTHORIZED,
+            r#"{"error":{"message":"bad key"}}"#
+        ));
+        assert!(is_key_retryable_upstream_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            r#"{"error":{"message":"insufficient_quota"}}"#
+        ));
+        assert!(is_key_retryable_upstream_error(
+            StatusCode::BAD_REQUEST,
+            r#"{"error":{"message":"余额不足或无可用资源包"}}"#
+        ));
+    }
+
+    #[test]
+    fn key_retryable_error_ignores_non_key_errors() {
+        assert!(!is_key_retryable_upstream_error(
+            StatusCode::BAD_REQUEST,
+            r#"{"error":{"message":"model does not exist"}}"#
+        ));
+        assert!(!is_key_retryable_upstream_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            r#"{"error":{"message":"upstream overloaded"}}"#
+        ));
     }
 }
 

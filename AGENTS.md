@@ -170,7 +170,7 @@ plutil -p ~/Library/LaunchAgents/homebrew.mxcl.galaxy-router.plist
 3. 用 `channel_id` 回查 `channels` 表，确认命中的渠道、端点和该渠道的 key 数量。
 4. 如果 cc 看见了上游错误，但 Web 请求日志没有失败记录，重点检查是否为流式请求。
 
-当前实现里有一个重要限制：非流式上游失败会把上游响应体写入 `error_message`，但 `response_content` 只在成功时写入；流式请求在建立 SSE 前失败时不会写入 `usage_logs`，而上游以 HTTP 200 建立 SSE 后再发送错误事件时，当前日志仍可能记录为 `status_code=200`，并且不会把错误事件写入 `error_message`。因此 Web 端“响应内容为空”不一定表示上游没有响应，可能是错误被记录在 `error_message`，或流式错误没有被完整落库。
+当前实现里：非流式上游失败会同时写入 `error_message` 和 `response_content`；流式请求在建立 SSE 前失败会写入 `usage_logs`；上游以 HTTP 200 建立 SSE 后发送错误事件时，会把 `error_message` 写入日志并将 `status_code` 记为失败态（例如 502）。如果首个 SSE 事件就是错误，代理可以在尚未向客户端输出内容前触发 key / 渠道重试；如果已经向客户端输出过正常内容，后续流内错误只会记录并透传，不会无感切换 key。
 
 ## Git 规范
 
@@ -201,6 +201,6 @@ Type 类型:
 - **代理统一入口**: 所有代理 handler（chat/responses/messages/embeddings/images）统一调用 `handle_proxy_request`，不各自实现转发逻辑
 - **缓存共享**: `ProxyCache` 被 admin handler（channels、groups）和 proxy 层共享，管理操作后自动失效缓存
 - **模型反向索引**: `ProxyCache.model_index` 维护 model→channel_id 映射，加速模型路由查找
-- **API Key 轮询**: 使用 `AtomicU64` 计数器实现无锁 round-robin；当前轮询粒度是“每次选中渠道发起请求”选择一个 key，不是在同一次请求失败后遍历该渠道的其他 key。上游失败重试会把整个 `channel_id` 加入排除列表，转向其他渠道；流式 SSE 建连成功后才出现的错误不会触发代理层重试。
+- **API Key 轮询**: 使用 `AtomicU64` 计数器实现无锁 round-robin；一次请求选中渠道后，先按 round-robin 起点选择一个 key，遇到 401/402/429 或余额不足、无可用资源包、insufficient_quota 等 key / 账号资源错误时，会在同渠道内尝试下一个 key。只有该渠道所有 key 都失败，才排除整个 `channel_id` 转向其他渠道；流式请求一旦已向客户端输出正常内容，后续错误不会触发无感 key 切换。
 - **上游错误脱敏**: `sanitize_upstream_error` 截断并提取关键信息，避免泄露上游内部细节
 - **统计聚合对齐整点**: aggregator 使用 wall-clock aligned sleep，而非固定间隔
