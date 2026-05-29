@@ -1,8 +1,7 @@
 use axum::{
     body::Body,
-    http::{Request, StatusCode},
+    http::Request,
     middleware,
-    response::Response,
     routing::{delete, get, post, put},
     Json, Router,
 };

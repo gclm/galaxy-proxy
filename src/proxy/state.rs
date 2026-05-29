@@ -17,6 +17,7 @@ pub struct ChannelStatus {
 }
 
 impl ChannelStatus {
+    #[allow(dead_code)]
     pub fn new(channel_id: String) -> Self {
         Self {
             channel_id,
@@ -83,6 +84,7 @@ impl ChannelStatus {
 
 /// 粘性会话
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct StickySession {
     pub session_hash: String,
     pub channel_id: String,
@@ -123,6 +125,7 @@ impl LoadBalancerState {
     }
 
     /// 获取或创建渠道状态
+    #[allow(dead_code)]
     pub async fn get_or_create_channel_status(&self, channel_id: &str) -> ChannelStatus {
         let mut states = self.channel_states.write().await;
         states

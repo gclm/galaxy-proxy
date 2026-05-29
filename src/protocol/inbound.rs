@@ -22,6 +22,7 @@ pub trait Inbound: Send + Sync {
     fn transform_stream_event(&self, event: &LlmStreamResponse) -> Result<Vec<u8>, InboundError>;
 
     /// 获取协议名称
+    #[allow(dead_code)]
     fn protocol_name(&self) -> &'static str;
 }
 

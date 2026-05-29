@@ -14,6 +14,7 @@ pub struct AnthropicOutbound;
 
 /// Anthropic 请求
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct AnthropicRequest {
     model: String,
     messages: Vec<AnthropicMessage>,
@@ -40,6 +41,7 @@ struct AnthropicMessage {
 
 /// Anthropic 响应
 #[derive(Debug, Serialize)]
+#[allow(dead_code)]
 struct AnthropicResponse {
     id: String,
     #[serde(rename = "type")]
@@ -53,6 +55,7 @@ struct AnthropicResponse {
 
 /// Anthropic 使用量
 #[derive(Debug, Serialize)]
+#[allow(dead_code)]
 struct AnthropicUsage {
     input_tokens: u32,
     output_tokens: u32,

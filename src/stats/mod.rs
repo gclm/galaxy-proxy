@@ -17,6 +17,7 @@ type ChannelStatsRow = (String, String, i32, i32, i32, i32, i32, f64);
 
 /// 用量日志
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[allow(dead_code)]
 pub struct UsageLog {
     pub id: String,
     pub api_key_id: Option<String>,
@@ -102,6 +103,7 @@ pub struct LogsFilter {
 
 /// 请求日志（含渠道名和 Key 名）
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+#[allow(dead_code)]
 pub struct UsageLogRow {
     pub id: String,
     pub api_key_id: Option<String>,
@@ -127,6 +129,7 @@ pub struct UsageLogRow {
 
 /// 请求日志详情（含请求/响应内容）
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+#[allow(dead_code)]
 pub struct UsageLogDetail {
     pub id: String,
     pub api_key_id: Option<String>,

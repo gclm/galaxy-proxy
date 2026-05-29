@@ -14,6 +14,7 @@ pub struct OpenAiResponsesOutbound;
 
 /// OpenAI Responses 请求
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct OpenAiResponsesRequest {
     model: String,
     input: serde_json::Value,

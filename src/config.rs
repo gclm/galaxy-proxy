@@ -106,18 +106,21 @@ fn default_pricing_refresh_hours() -> u64 {
 
 /// 运行时配置（从数据库加载）
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct RuntimeConfig {
     pub scheduler: SchedulerConfig,
     pub sticky_session: StickySessionConfig,
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct SchedulerConfig {
     pub top_k: usize,
     pub score_weights: ScoreWeights,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct ScoreWeights {
     pub priority: f64,
     pub load: f64,
@@ -139,6 +142,7 @@ impl Default for ScoreWeights {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct StickySessionConfig {
     pub enabled: bool,
     pub ttl_seconds: u64,

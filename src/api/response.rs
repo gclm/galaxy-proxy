@@ -55,6 +55,7 @@ impl ApiError {
     }
 
     /// 禁止访问
+    #[allow(dead_code)]
     pub fn forbidden(message: impl Into<String>) -> (StatusCode, Json<Self>) {
         (StatusCode::FORBIDDEN, Json(Self::new(403, message)))
     }

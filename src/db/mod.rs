@@ -10,6 +10,7 @@ use crate::config::{
 
 /// 设置项（数据库行）
 #[derive(Debug, sqlx::FromRow)]
+#[allow(dead_code)]
 struct SettingRow {
     key: String,
     category: String,
@@ -19,6 +20,7 @@ struct SettingRow {
 
 /// 设置项（API 返回）
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct SettingItem {
     pub key: String,
     pub category: String,
@@ -107,6 +109,7 @@ impl Database {
     }
 
     /// 从数据库加载运行时配置
+    #[allow(dead_code)]
     pub async fn load_runtime_config(&self) -> Result<RuntimeConfig> {
         let settings: Vec<(String, String)> = sqlx::query_as("SELECT key, value FROM settings")
             .fetch_all(&self.pool)
@@ -119,6 +122,7 @@ impl Database {
     }
 
     /// 按分类查询设置
+    #[allow(dead_code)]
     pub async fn get_settings_by_category(&self, category: &str) -> Result<Vec<SettingItem>> {
         let settings = sqlx::query_as::<_, SettingRow>(
             "SELECT key, category, value, description FROM settings WHERE category = ? ORDER BY key"
@@ -139,6 +143,7 @@ impl Database {
     }
 
     /// 获取所有设置
+    #[allow(dead_code)]
     pub async fn get_all_settings(&self) -> Result<Vec<SettingItem>> {
         let settings = sqlx::query_as::<_, SettingRow>(
             "SELECT key, category, value, description FROM settings ORDER BY category, key",
@@ -158,6 +163,7 @@ impl Database {
     }
 
     /// 更新设置
+    #[allow(dead_code)]
     pub async fn update_setting(&self, key: &str, value: &str) -> Result<()> {
         sqlx::query("UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?")
             .bind(value)
@@ -167,6 +173,7 @@ impl Database {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn build_runtime_config(
         &self,
         settings_map: &std::collections::HashMap<String, String>,

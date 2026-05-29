@@ -54,12 +54,14 @@ impl ApiKeyCache {
     }
 
     /// 清除缓存
+    #[allow(dead_code)]
     pub async fn invalidate(&self, key: &str) {
         let mut cache = self.keys.write().await;
         cache.remove(key);
     }
 
     /// 清除所有缓存
+    #[allow(dead_code)]
     pub async fn invalidate_all(&self) {
         let mut cache = self.keys.write().await;
         cache.clear();
@@ -114,6 +116,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthClaims {
 }
 
 /// API Key 认证结果（代理 API 认证）
+#[allow(dead_code)]
 pub struct ApiKeyAuth {
     pub key_id: String,
     pub key_name: String,

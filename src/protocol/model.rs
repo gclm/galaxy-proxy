@@ -159,6 +159,7 @@ pub struct CompletionTokensDetails {
 
 /// 统一请求模型
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct LlmRequest {
     pub model: String,
     pub messages: Vec<Message>,
@@ -230,7 +231,7 @@ pub struct LlmStreamResponse {
 }
 
 impl LlmRequest {
-    /// 获取 stream 标志
+    #[allow(dead_code)]
     pub fn is_stream(&self) -> bool {
         self.stream.unwrap_or(false)
     }
@@ -238,6 +239,7 @@ impl LlmRequest {
 
 impl LlmResponse {
     /// 获取第一个选择
+    #[allow(dead_code)]
     pub fn first_choice(&self) -> Option<&Choice> {
         self.choices.first()
     }
@@ -250,11 +252,13 @@ impl LlmResponse {
 
 impl LlmStreamResponse {
     /// 获取第一个选择
+    #[allow(dead_code)]
     pub fn first_choice(&self) -> Option<&StreamChoice> {
         self.choices.first()
     }
 
     /// 是否是结束事件
+    #[allow(dead_code)]
     pub fn is_done(&self) -> bool {
         self.choices
             .first()

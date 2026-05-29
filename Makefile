@@ -1,29 +1,35 @@
 # Galaxy Proxy Makefile
 
-.PHONY: build run test clean fmt clippy release docker help frontend-build dev dev-stop
+.PHONY: all build frontend-build dev dev-rust dev-frontend dev-stop \
+        test fmt clippy clean check doc watch watch-test db-reset \
+        release release-archive release-all \
+        release-linux-amd64 release-linux-arm64 \
+        release-darwin-arm64 release-darwin-x86_64 \
+        release-windows-amd64 \
+        docker docker-run help
+
+VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo 'dev')
+COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo 'unknown')
+APP     := galaxy-proxy
+DIST    := build/dist
 
 # 默认目标
 all: build
 
-# 前端构建
+# ===== 开发 =====
+
 frontend-build:
 	cd frontend && pnpm install && pnpm build
 
-# 构建（包含前端）
 build: frontend-build
 	cargo build
 
-# ===== 开发模式：同时启动前后端 =====
-
-# 运行rust 后端
 dev-rust:
 	cargo run
 
-# 启动前端开发环境
 dev-frontend:
 	cd frontend && pnpm dev
 
-# 启动开发环境（后端 + 前端 dev server，Ctrl+C 停止全部）
 dev:
 	@echo "启动开发环境..."
 	@trap 'kill 0; exit 0' INT TERM; \
@@ -31,93 +37,131 @@ dev:
 	cd frontend && npx vite; \
 	wait
 
-# 停止残留的开发进程
 dev-stop:
 	@lsof -ti :8080 2>/dev/null | xargs kill 2>/dev/null; \
 	lsof -ti :5173 2>/dev/null | xargs kill 2>/dev/null; \
 	lsof -ti :5174 2>/dev/null | xargs kill 2>/dev/null; \
 	echo "开发环境已停止"
 
-# ===== 测试 =====
+# ===== 测试 / 检查 =====
 
-# 运行测试
 test:
 	cargo test
 
-# 格式化代码
 fmt:
 	cargo fmt
 
-# 代码检查
 clippy:
 	cargo clippy -- -D warnings
 
-# 清理构建产物
 clean:
 	cargo clean
 	rm -rf data/galaxy.db
 	rm -rf /tmp/galaxy_test*
+	rm -rf $(DIST)
 
-# 发布构建
-release:
-	cargo build --release
-
-# 交叉编译（可选）
-release-linux:
-	cross build --release --target x86_64-unknown-linux-gnu
-
-release-macos:
-	cargo build --release --target aarch64-apple-darwin
-
-# Docker 构建
-docker:
-	docker build -t galaxy-proxy:latest .
-
-# Docker 运行
-docker-run:
-	docker run -p 8080:8080 -v $(PWD)/data:/app/data galaxy-proxy:latest
-
-# 检查代码（格式 + 检查 + 测试）
 check: fmt clippy test
 
-# 生成文档
 doc:
 	cargo doc --open
 
-# 监听文件变化自动构建
 watch:
 	cargo watch -x build
 
-# 监听文件变化自动测试
 watch-test:
 	cargo watch -x test
 
-# 数据库重置
 db-reset:
 	rm -f data/galaxy.db
 	@echo "Database reset. Run 'make run' to recreate."
 
-# 显示帮助
+# ===== 发布构建 =====
+
+release:
+	cargo build --release
+
+# 单目标交叉编译（需要对应 toolchain 已安装）
+release-linux-amd64:
+	cross build --release --target x86_64-unknown-linux-gnu
+
+release-linux-arm64:
+	cross build --release --target aarch64-unknown-linux-gnu
+
+release-darwin-arm64:
+	cargo build --release --target aarch64-apple-darwin
+
+release-darwin-x86_64:
+	cargo build --release --target x86_64-apple-darwin
+
+release-windows-amd64:
+	cross build --release --target x86_64-pc-windows-gnu
+
+# 打 zip 包（在交叉编译完成后调用）
+# 用法: make release-archive TARGET=aarch64-apple-darwin
+release-archive:
+	@mkdir -p $(DIST)
+	@target=$(TARGET); \
+	os=$${target%-*-*}; \
+	arch=$${target##*-}; \
+	case "$$os" in \
+	  x86_64-pc-windows-gnu) ext=".exe"; name="windows-amd64";; \
+	  aarch64-apple-darwin) name="darwin-arm64";; \
+	  x86_64-apple-darwin) name="darwin-x86_64";; \
+	  x86_64-unknown-linux-gnu) name="linux-amd64";; \
+	  aarch64-unknown-linux-gnu) name="linux-arm64";; \
+	  *) name="$$os-$$arch";; \
+	esac; \
+	bin="target/$$target/release/$(APP)$${ext}"; \
+	if [ -f "$$bin" ]; then \
+	  cp "$$bin" "$(DIST)/$(APP)"; \
+	  cd $(DIST) && zip -q "$(APP)-$$name.zip" $(APP) && rm $(APP); \
+	  echo "已打包: $(DIST)/$(APP)-$$name.zip"; \
+	else \
+	  echo "二进制不存在: $$bin" >&2; exit 1; \
+	fi
+
+# CI 用：全平台构建 + 打包（由 GitHub Actions 按矩阵调用单个目标）
+# 本地全量构建需要所有 toolchain 就绪
+release-all: release-darwin-arm64 release-darwin-x86_64 \
+             release-linux-amd64 release-linux-arm64
+
+# ===== Docker =====
+
+docker:
+	docker build -t galaxy-proxy:latest .
+
+docker-run:
+	docker run -p 8080:8080 -v $(PWD)/data:/app/data galaxy-proxy:latest
+
+# ===== 帮助 =====
+
 help:
 	@echo "Galaxy Proxy - AI 协议互转代理网关"
 	@echo ""
 	@echo "用法: make [target]"
 	@echo ""
-	@echo "目标:"
-	@echo "  build          开发构建"
-	@echo "  run            运行服务"
-	@echo "  dev            启动开发环境（前后端同时运行，Ctrl+C 停止）"
-	@echo "  dev-stop       停止残留的开发进程"
-	@echo "  test           运行测试"
-	@echo "  fmt            格式化代码"
-	@echo "  clippy         代码检查"
-	@echo "  clean          清理构建产物"
-	@echo "  release        发布构建"
-	@echo "  docker         Docker 构建"
-	@echo "  docker-run     Docker 运行"
-	@echo "  check          完整检查（格式+检查+测试）"
-	@echo "  doc            生成文档"
-	@echo "  watch          监听自动构建"
-	@echo "  watch-test     监听自动测试"
-	@echo "  db-reset       重置数据库"
-	@echo "  help           显示帮助"
+	@echo "开发:"
+	@echo "  build              开发构建"
+	@echo "  dev                启动开发环境（前后端同时运行）"
+	@echo "  dev-stop           停止残留的开发进程"
+	@echo ""
+	@echo "测试 / 检查:"
+	@echo "  test               运行测试"
+	@echo "  fmt                格式化代码"
+	@echo "  clippy             代码检查"
+	@echo "  check              完整检查（格式+检查+测试）"
+	@echo ""
+	@echo "发布:"
+	@echo "  release            本机 release 构建"
+	@echo "  release-darwin-arm64    macOS ARM64"
+	@echo "  release-darwin-x86_64   macOS x86_64"
+	@echo "  release-linux-amd64     Linux AMD64"
+	@echo "  release-linux-arm64     Linux ARM64"
+	@echo "  release-windows-amd64   Windows AMD64"
+	@echo "  release-archive TARGET=<triple>  打 zip 包"
+	@echo ""
+	@echo "运维:"
+	@echo "  docker             Docker 构建"
+	@echo "  docker-run         Docker 运行"
+	@echo "  db-reset           重置数据库"
+	@echo "  clean              清理构建产物"

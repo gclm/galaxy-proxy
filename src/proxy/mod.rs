@@ -50,12 +50,14 @@ impl ProxyCache {
     }
 
     /// 清除渠道缓存
+    #[allow(dead_code)]
     pub async fn invalidate_channel(&self, id: &str) {
         let mut cache = self.channels.write().await;
         cache.remove(id);
     }
 
     /// 清除所有渠道缓存
+    #[allow(dead_code)]
     pub async fn invalidate_all_channels(&self) {
         let mut cache = self.channels.write().await;
         cache.clear();
@@ -79,12 +81,14 @@ impl ProxyCache {
     }
 
     /// 清除分组缓存
+    #[allow(dead_code)]
     pub async fn invalidate_group(&self, name: &str) {
         let mut cache = self.groups.write().await;
         cache.remove(name);
     }
 
     /// 清除所有分组缓存
+    #[allow(dead_code)]
     pub async fn invalidate_all_groups(&self) {
         let mut cache = self.groups.write().await;
         cache.clear();
@@ -150,6 +154,7 @@ pub struct ProxyState {
 
 /// 渠道信息
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ChannelInfo {
     pub id: String,
     pub name: String,
@@ -161,6 +166,7 @@ pub struct ChannelInfo {
 
 /// 分组信息
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct GroupInfo {
     pub id: String,
     pub name: String,
@@ -169,6 +175,7 @@ pub struct GroupInfo {
 
 /// 分组项信息
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct GroupItemInfo {
     pub channel_id: String,
     pub model_name: String,
@@ -278,6 +285,7 @@ impl ProxyState {
     }
 
     /// 按模型选择渠道（不限端点类型，用于跨协议转换）
+    #[allow(dead_code)]
     pub async fn select_channel_for_model(
         &self,
         model: &str,
@@ -288,6 +296,7 @@ impl ProxyState {
     }
 
     /// 按模型选择渠道（支持排除已失败渠道，不限端点类型）
+    #[allow(dead_code)]
     pub async fn select_channel_for_model_with_exclude(
         &self,
         model: &str,
@@ -1402,6 +1411,7 @@ fn collect_sse_text(text: &str, endpoint_type: &EndpointType, output: &mut Strin
 }
 
 /// 通配符匹配
+#[allow(dead_code)]
 fn wildcard_match(pattern: &str, text: &str) -> bool {
     let regex_pattern = pattern
         .replace('.', "\\.")

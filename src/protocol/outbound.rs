@@ -24,9 +24,11 @@ pub trait Outbound: Send + Sync {
     ) -> Result<Option<LlmStreamResponse>, OutboundError>;
 
     /// 获取提供商 API 格式
+    #[allow(dead_code)]
     fn api_format(&self) -> &'static str;
 
     /// 获取请求路径
+    #[allow(dead_code)]
     fn request_path(&self) -> &'static str;
 
     /// 设置认证头
@@ -43,5 +45,6 @@ pub enum OutboundError {
     ParseError(String),
 
     #[error("上游错误: {status} {message}")]
+    #[allow(dead_code)]
     UpstreamError { status: u16, message: String },
 }

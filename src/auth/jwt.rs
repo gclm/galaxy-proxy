@@ -51,6 +51,7 @@ impl JwtService {
     }
 
     /// 验证 Token
+    #[allow(dead_code)]
     pub fn verify_token(&self, token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
         let token_data = decode::<Claims>(
             token,

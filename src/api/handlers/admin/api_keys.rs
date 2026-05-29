@@ -203,6 +203,7 @@ pub async fn delete(
 }
 
 /// 验证 API Key（供代理 API 使用）
+#[allow(dead_code)]
 pub async fn validate_api_key(pool: &SqlitePool, api_key: &str) -> bool {
     let result = sqlx::query_scalar::<_, bool>("SELECT enabled FROM api_keys WHERE api_key = ?")
         .bind(api_key)
