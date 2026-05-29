@@ -138,6 +138,7 @@ impl LoadBalancerState {
     pub async fn record_success(&self, channel_id: &str, latency_ms: f64) {
         let mut states = self.channel_states.write().await;
         if let Some(status) = states.get_mut(channel_id) {
+            status.failure_count = 0;
             status.record_success(latency_ms);
         }
     }

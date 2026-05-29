@@ -1,7 +1,7 @@
 use chrono::Timelike;
 use sqlx::SqlitePool;
 use std::sync::Arc;
-use tokio::time::{interval, Duration};
+use tokio::time::Duration;
 
 /// 统计聚合器
 pub struct StatsAggregator {
@@ -21,16 +21,21 @@ impl StatsAggregator {
         });
     }
 
-    /// 运行聚合任务
+    /// 运行聚合任务（对齐整点，每天 2:00 UTC 触发）
     async fn run_aggregation(&self) {
-        // 每天凌晨 2 点执行聚合
-        let mut interval = interval(Duration::from_secs(3600)); // 每小时检查一次
-
         loop {
-            interval.tick().await;
+            let now = chrono::Utc::now();
+            let next = now + chrono::Duration::hours(1);
+            let next_hour = next
+                .with_minute(0).unwrap()
+                .with_second(0).unwrap()
+                .with_nanosecond(0).unwrap();
+            let sleep_dur = (next_hour - now).to_std().unwrap_or(Duration::from_secs(3600));
+
+            tokio::time::sleep(sleep_dur).await;
 
             let now = chrono::Utc::now();
-            if now.hour() == 2 && now.minute() < 60
+            if now.hour() == 2
                 && let Err(e) = self.aggregate_daily_stats().await {
                     tracing::error!("聚合每日统计失败: {}", e);
                 }

@@ -15,7 +15,7 @@ brew install gclm/tap/galaxy-router
 brew services start gclm/tap/galaxy-router
 ```
 
-安装完成后访问 `http://127.0.0.1:29088` 进入管理界面。
+安装完成后访问 `http://127.0.0.1:8080` 进入管理界面。
 
 **管理文件路径：**
 

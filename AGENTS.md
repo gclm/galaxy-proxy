@@ -65,6 +65,20 @@ ApiError::conflict("资源冲突")         // 409
 ApiError::internal_error("服务器错误") // 500
 ```
 
+### 认证架构
+
+管理 API 和代理 API 使用不同的认证机制，在路由层强制执行：
+
+| 层级 | 机制 | 保护范围 |
+|------|------|----------|
+| `require_admin_auth` 中间件 | JWT Bearer Token | `/api/v1/admin/*`（排除 init、login） |
+| `ApiKeyAuth` 提取器 | API Key（Bearer 或 x-api-key） | `/v1/*` 代理端点 |
+| 无认证 | — | `/api/v1/health`、`/api/v1/init`、`/api/v1/admin/auth/login` |
+
+管理 API 认证中间件位于 `src/api/middleware/mod.rs` 的 `require_admin_auth`，通过 `extensions` 获取 JWT secret。所有管理路由（渠道、分组、API Key、统计、设置、备份等）统一受此中间件保护，无需在每个 handler 中重复校验。
+
+JWT 过期时间从 `config.toml` 的 `auth.token_expiry_hours` 读取，默认 24 小时。
+
 ## 数据库规范
 
 ### 表结构
@@ -87,12 +101,14 @@ ApiError::internal_error("服务器错误") // 500
 |------|------|
 | `api/` | HTTP 路由、请求处理 |
 | `api/handlers/admin/` | 管理 API 处理器 |
-| `api/handlers/proxy/` | 代理 API 处理器 |
-| `api/middleware/` | 认证中间件 |
+| `api/handlers/proxy/` | 代理 API 处理器（统一走 `handle_proxy_request`） |
+| `api/middleware/` | JWT 中间件 + API Key 提取器 |
 | `api/response.rs` | 统一响应格式 |
 | `auth/` | 密码哈希、JWT |
 | `config.rs` | TOML 配置加载 |
 | `db/` | 数据库连接、迁移 |
+| `proxy/` | 代理核心（缓存、模型索引、渠道选择、协议转换） |
+| `stats/` | 统计聚合（用量/成本）+ 模型定价信息 |
 
 ### 命名规范
 
@@ -156,13 +172,11 @@ Type 类型:
 - `feature/*`: 功能分支
 - `fix/*`: 修复分支
 
-## 待实现功能
+## 架构要点
 
-- [x] 分组管理 API (Phase 4)
-- [x] 客户端 API Key 管理 (Phase 5)
-- [x] 协议转换层 (Phase 6)
-- [x] 代理转发 (Phase 7)
-- [x] 负载均衡 (Phase 8)
-- [x] 统计系统 (Phase 9)
-- [x] 前端管理面板 (Phase 10)
-- [x] 渠道模型获取 (2026-05-26)
+- **代理统一入口**: 所有代理 handler（chat/responses/messages/embeddings/images）统一调用 `handle_proxy_request`，不各自实现转发逻辑
+- **缓存共享**: `ProxyCache` 被 admin handler（channels、groups）和 proxy 层共享，管理操作后自动失效缓存
+- **模型反向索引**: `ProxyCache.model_index` 维护 model→channel_id 映射，加速模型路由查找
+- **API Key 轮询**: 使用 `AtomicU64` 计数器实现无锁 round-robin
+- **上游错误脱敏**: `sanitize_upstream_error` 截断并提取关键信息，避免泄露上游内部细节
+- **统计聚合对齐整点**: aggregator 使用 wall-clock aligned sleep，而非固定间隔

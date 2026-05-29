@@ -90,6 +90,7 @@ pub struct AddGroupItemRequest {
 #[derive(Clone)]
 pub struct GroupState {
     pub pool: SqlitePool,
+    pub cache: crate::proxy::ProxyCache,
 }
 
 /// 获取分组列表（支持搜索、筛选、排序、分页）
@@ -255,6 +256,7 @@ pub async fn create(
         .await
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
+    state.cache.invalidate_all_groups().await;
     let group = get_group_by_id(&state.pool, &group_id).await?;
     Ok((StatusCode::CREATED, Json(ApiResponse::success(group))))
 }
@@ -324,6 +326,7 @@ pub async fn update(
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
     let group = get_group_by_id(&state.pool, &id).await?;
+    state.cache.invalidate_all_groups().await;
     Ok(Json(ApiResponse::success(group)))
 }
 
@@ -342,6 +345,7 @@ pub async fn delete(
         return Err(ApiError::not_found("分组不存在"));
     }
 
+    state.cache.invalidate_all_groups().await;
     Ok(Json(crate::api::response::success_empty()))
 }
 
@@ -412,6 +416,7 @@ pub async fn delete_item(
         return Err(ApiError::not_found("分组项不存在"));
     }
 
+    state.cache.invalidate_all_groups().await;
     Ok(Json(crate::api::response::success_empty()))
 }
 

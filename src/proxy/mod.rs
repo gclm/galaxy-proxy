@@ -12,16 +12,18 @@ use axum::http::{HeaderMap, StatusCode};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::RwLock;
 
 /// 缓存大小限制
 const CACHE_MAX_SIZE: usize = 1000;
 
-/// 渠道/分组缓存
+/// 渠道/分组缓存（含模型反向索引）
 #[derive(Clone)]
 pub struct ProxyCache {
     channels: Arc<RwLock<HashMap<String, ChannelInfo>>>,
     groups: Arc<RwLock<HashMap<String, GroupInfo>>>,
+    model_index: Arc<RwLock<HashMap<String, Vec<String>>>>,
 }
 
 impl ProxyCache {
@@ -29,6 +31,7 @@ impl ProxyCache {
         Self {
             channels: Arc::new(RwLock::new(HashMap::new())),
             groups: Arc::new(RwLock::new(HashMap::new())),
+            model_index: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -41,11 +44,31 @@ impl ProxyCache {
     /// 设置渠道缓存（超过限制时清除最旧条目）
     pub async fn set_channel(&self, channel: ChannelInfo) {
         let mut cache = self.channels.write().await;
+
         if cache.len() >= CACHE_MAX_SIZE {
             if let Some(oldest_key) = cache.keys().next().cloned() {
+                let mut idx = self.model_index.write().await;
+                if let Some(old_ch) = cache.get(&oldest_key) {
+                    for model in &old_ch.models {
+                        if let Some(ids) = idx.get_mut(model) {
+                            ids.retain(|id| id != &oldest_key);
+                        }
+                    }
+                }
                 cache.remove(&oldest_key);
             }
         }
+
+        // 更新模型反向索引
+        {
+            let mut idx = self.model_index.write().await;
+            for model in &channel.models {
+                idx.entry(model.clone())
+                    .or_default()
+                    .push(channel.id.clone());
+            }
+        }
+
         cache.insert(channel.id.clone(), channel);
     }
 
@@ -53,7 +76,14 @@ impl ProxyCache {
     #[allow(dead_code)]
     pub async fn invalidate_channel(&self, id: &str) {
         let mut cache = self.channels.write().await;
-        cache.remove(id);
+        if let Some(ch) = cache.remove(id) {
+            let mut idx = self.model_index.write().await;
+            for model in &ch.models {
+                if let Some(ids) = idx.get_mut(model) {
+                    ids.retain(|cid| cid != id);
+                }
+            }
+        }
     }
 
     /// 清除所有渠道缓存
@@ -61,6 +91,7 @@ impl ProxyCache {
     pub async fn invalidate_all_channels(&self) {
         let mut cache = self.channels.write().await;
         cache.clear();
+        self.model_index.write().await.clear();
     }
 
     /// 获取缓存的分组
@@ -92,6 +123,12 @@ impl ProxyCache {
     pub async fn invalidate_all_groups(&self) {
         let mut cache = self.groups.write().await;
         cache.clear();
+    }
+
+    /// 查找包含指定模型的渠道 ID 列表
+    pub async fn find_channels_by_model(&self, model: &str) -> Vec<String> {
+        let idx = self.model_index.read().await;
+        idx.get(model).cloned().unwrap_or_default()
     }
 }
 
@@ -150,6 +187,7 @@ pub struct ProxyState {
     pub model_registry: ModelRegistry,
     pub cache: ProxyCache,
     pub queue: Option<RequestQueue>,
+    key_counter: Arc<AtomicU64>,
 }
 
 /// 渠道信息
@@ -252,6 +290,7 @@ impl ProxyState {
             pool,
             http_client,
             lb_state: LoadBalancerState::new(),
+            key_counter: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -339,7 +378,7 @@ impl ProxyState {
                     if let Some(hash) = session_hash {
                         self.lb_state.set_sticky_session(hash, &channel.id).await;
                     }
-                    let target_model = self.apply_model_mapping(&channel, model);
+                    let target_model = item.model_name.clone();
                     return Ok(SelectionResult { channel, target_model, endpoint });
                 }
             }
@@ -534,13 +573,29 @@ impl ProxyState {
         Ok(channel)
     }
 
-    /// 按模型查找渠道（支持排除和端点过滤）
+    /// 按模型查找渠道（优先缓存索引，回退全表扫描）
     async fn find_channel_by_model(
         &self,
         model: &str,
         exclude_ids: &[String],
         endpoint_filter: impl Fn(&ChannelInfo) -> bool,
     ) -> Result<ChannelInfo, ProxyError> {
+        // 1. 从 model_index 缓存查找
+        let cached_ids = self.cache.find_channels_by_model(model).await;
+        if !cached_ids.is_empty() {
+            for cid in &cached_ids {
+                if exclude_ids.contains(cid) {
+                    continue;
+                }
+                if let Ok(channel) = self.get_channel(cid).await {
+                    if endpoint_filter(&channel) {
+                        return Ok(channel);
+                    }
+                }
+            }
+        }
+
+        // 2. 回退到数据库全表扫描（冷启动或缓存未命中）
         let channels = sqlx::query_as::<_, (String, String, String, String, String, String)>(
             "SELECT id, name, api_keys, endpoints, models, custom_headers FROM channels WHERE enabled = 1",
         )
@@ -568,25 +623,22 @@ impl ProxyState {
 
             let custom_headers: Vec<CustomHeader> = serde_json::from_str(&custom_headers_str).unwrap_or_default();
 
-            if !endpoint_filter(&ChannelInfo {
+            let channel = ChannelInfo {
                 id: id.clone(),
                 name: name.clone(),
                 api_keys: api_keys.clone(),
                 endpoints: endpoints.clone(),
                 models: models.clone(),
                 custom_headers: custom_headers.clone(),
-            }) {
+            };
+
+            if !endpoint_filter(&channel) {
                 continue;
             }
 
-            return Ok(ChannelInfo {
-                id,
-                name,
-                api_keys,
-                endpoints,
-                models,
-                custom_headers,
-            });
+            // 写入缓存供后续请求使用
+            self.cache.set_channel(channel.clone()).await;
+            return Ok(channel);
         }
 
         Err(ProxyError::NoAvailableChannel("没有可用渠道".to_string()))
@@ -597,14 +649,13 @@ impl ProxyState {
         model.to_string()
     }
 
-    /// 选择 API Key（轮询）
+    /// 选择 API Key（原子计数器轮询）
     pub fn select_api_key(&self, channel: &ChannelInfo) -> String {
         if channel.api_keys.is_empty() {
             return String::new();
         }
 
-        // 简单轮询：使用时间戳取模
-        let idx = (chrono::Utc::now().timestamp_millis() as usize) % channel.api_keys.len();
+        let idx = self.key_counter.fetch_add(1, Ordering::Relaxed) as usize % channel.api_keys.len();
         channel.api_keys[idx].clone()
     }
 }
@@ -1285,21 +1336,27 @@ pub fn format_proxy_error(e: ProxyError, format: &ErrorFormat) -> axum::response
             })),
         )
             .into_response(),
-        (ProxyError::UpstreamError { status, body }, ErrorFormat::OpenAi) => (
-            status,
-            axum::Json(serde_json::json!({
-                "error": { "message": body, "type": "server_error" }
-            })),
-        )
-            .into_response(),
-        (ProxyError::UpstreamError { status, body }, ErrorFormat::Anthropic) => (
-            status,
-            axum::Json(serde_json::json!({
-                "type": "error",
-                "error": { "type": "api_error", "message": body }
-            })),
-        )
-            .into_response(),
+        (ProxyError::UpstreamError { status, body }, ErrorFormat::OpenAi) => {
+            let msg = sanitize_upstream_error(&body);
+            (
+                status,
+                axum::Json(serde_json::json!({
+                    "error": { "message": msg, "type": "server_error" }
+                })),
+            )
+                .into_response()
+        }
+        (ProxyError::UpstreamError { status, body }, ErrorFormat::Anthropic) => {
+            let msg = sanitize_upstream_error(&body);
+            (
+                status,
+                axum::Json(serde_json::json!({
+                    "type": "error",
+                    "error": { "type": "api_error", "message": msg }
+                })),
+            )
+                .into_response()
+        }
         (e, ErrorFormat::OpenAi) => (
             StatusCode::BAD_GATEWAY,
             axum::Json(serde_json::json!({
@@ -1316,6 +1373,27 @@ pub fn format_proxy_error(e: ProxyError, format: &ErrorFormat) -> axum::response
         )
             .into_response(),
     }
+}
+
+/// 截断上游错误体，避免泄漏敏感信息
+fn sanitize_upstream_error(body: &str) -> String {
+    let truncated = if body.len() > 500 {
+        format!("{}...", &body[..500])
+    } else {
+        body.to_string()
+    };
+
+    // 尝试提取 message 字段，避免暴露原始 JSON 结构
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(body) {
+        if let Some(msg) = v["error"]["message"].as_str() {
+            return msg.to_string();
+        }
+        if let Some(msg) = v["message"].as_str() {
+            return msg.to_string();
+        }
+    }
+
+    truncated
 }
 
 /// 查找 SSE 事件边界（\n\n 或 \r\n\r\n）

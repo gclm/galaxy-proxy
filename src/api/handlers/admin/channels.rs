@@ -137,6 +137,7 @@ pub struct UpdateChannelRequest {
 #[derive(Clone)]
 pub struct ChannelState {
     pub pool: SqlitePool,
+    pub cache: crate::proxy::ProxyCache,
 }
 
 /// 获取渠道列表（支持搜索、筛选、排序、分页）
@@ -275,6 +276,7 @@ pub async fn create(
 
     // 返回创建的渠道
     let channel = get_channel_by_id(&state.pool, &id).await?;
+    state.cache.invalidate_all_channels().await;
     Ok((StatusCode::CREATED, Json(ApiResponse::success(channel))))
 }
 
@@ -305,77 +307,84 @@ pub async fn update(
     }
 
     // 构建更新语句
-    let mut updates = Vec::new();
-    let mut values: Vec<String> = Vec::new();
+    let mut builder = sqlx::QueryBuilder::new("UPDATE channels SET ");
+    let mut separated = builder.separated(", ");
+    let mut has_update = false;
 
-    if let Some(name) = &req.name {
-        updates.push("name = ?");
-        values.push(name.clone());
+    if let Some(ref name) = req.name {
+        separated.push("name = ");
+        separated.push_bind_unseparated(name);
+        has_update = true;
     }
-    if let Some(api_keys) = &req.api_keys {
-        updates.push("api_keys = ?");
-        values.push(serde_json::to_string(api_keys).unwrap_or_default());
+    if let Some(ref api_keys) = req.api_keys {
+        separated.push("api_keys = ");
+        separated.push_bind_unseparated(serde_json::to_string(api_keys).unwrap_or_default());
+        has_update = true;
     }
-    if let Some(endpoints) = &req.endpoints {
-        updates.push("endpoints = ?");
-        values.push(serde_json::to_string(endpoints).unwrap_or_default());
+    if let Some(ref endpoints) = req.endpoints {
+        separated.push("endpoints = ");
+        separated.push_bind_unseparated(serde_json::to_string(endpoints).unwrap_or_default());
+        has_update = true;
     }
-    if let Some(models) = &req.models {
-        updates.push("models = ?");
-        values.push(serde_json::to_string(models).unwrap_or_default());
+    if let Some(ref models) = req.models {
+        separated.push("models = ");
+        separated.push_bind_unseparated(serde_json::to_string(models).unwrap_or_default());
+        has_update = true;
     }
-    if let Some(custom_headers) = &req.custom_headers {
-        updates.push("custom_headers = ?");
-        values.push(serde_json::to_string(custom_headers).unwrap_or_default());
+    if let Some(ref custom_headers) = req.custom_headers {
+        separated.push("custom_headers = ");
+        separated.push_bind_unseparated(serde_json::to_string(custom_headers).unwrap_or_default());
+        has_update = true;
     }
-    if let Some(enabled) = &req.enabled {
-        updates.push("enabled = ?");
-        values.push(if *enabled { "1".to_string() } else { "0".to_string() });
+    if let Some(enabled) = req.enabled {
+        separated.push("enabled = ");
+        separated.push_bind_unseparated(enabled);
+        has_update = true;
     }
-    if let Some(rate_limit_rpm) = &req.rate_limit_rpm {
-        updates.push("rate_limit_rpm = ?");
-        values.push(rate_limit_rpm.to_string());
+    if let Some(rate_limit_rpm) = req.rate_limit_rpm {
+        separated.push("rate_limit_rpm = ");
+        separated.push_bind_unseparated(rate_limit_rpm);
+        has_update = true;
     }
-    if let Some(rate_limit_tpm) = &req.rate_limit_tpm {
-        updates.push("rate_limit_tpm = ?");
-        values.push(rate_limit_tpm.to_string());
+    if let Some(rate_limit_tpm) = req.rate_limit_tpm {
+        separated.push("rate_limit_tpm = ");
+        separated.push_bind_unseparated(rate_limit_tpm);
+        has_update = true;
     }
-    if let Some(failure_threshold) = &req.failure_threshold {
-        updates.push("failure_threshold = ?");
-        values.push(failure_threshold.to_string());
+    if let Some(failure_threshold) = req.failure_threshold {
+        separated.push("failure_threshold = ");
+        separated.push_bind_unseparated(failure_threshold);
+        has_update = true;
     }
-    if let Some(blacklist_minutes) = &req.blacklist_minutes {
-        updates.push("blacklist_minutes = ?");
-        values.push(blacklist_minutes.to_string());
+    if let Some(blacklist_minutes) = req.blacklist_minutes {
+        separated.push("blacklist_minutes = ");
+        separated.push_bind_unseparated(blacklist_minutes);
+        has_update = true;
     }
-    if let Some(concurrency) = &req.concurrency {
-        updates.push("concurrency = ?");
-        values.push(concurrency.to_string());
+    if let Some(concurrency) = req.concurrency {
+        separated.push("concurrency = ");
+        separated.push_bind_unseparated(concurrency);
+        has_update = true;
     }
 
-    if updates.is_empty() {
+    if !has_update {
         return Err(ApiError::bad_request("没有需要更新的字段"));
     }
 
-    updates.push("updated_at = CURRENT_TIMESTAMP");
+    separated.push("updated_at = CURRENT_TIMESTAMP");
 
-    // 构建动态 SQL
-    let sql = format!("UPDATE channels SET {} WHERE id = ?", updates.join(", "));
-    let sql: &'static str = Box::leak(sql.into_boxed_str());
+    builder.push(" WHERE id = ");
+    builder.push_bind(&id);
 
-    let mut query = sqlx::query(sql);
-    for value in &values {
-        query = query.bind(value);
-    }
-    query = query.bind(&id);
-
-    query
+    builder
+        .build()
         .execute(&state.pool)
         .await
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
     // 返回更新后的渠道
     let channel = get_channel_by_id(&state.pool, &id).await?;
+    state.cache.invalidate_channel(&id).await;
     Ok(Json(ApiResponse::success(channel)))
 }
 
@@ -394,6 +403,7 @@ pub async fn delete(
         return Err(ApiError::not_found("渠道不存在"));
     }
 
+    state.cache.invalidate_channel(&id).await;
     Ok(Json(crate::api::response::success_empty()))
 }
 

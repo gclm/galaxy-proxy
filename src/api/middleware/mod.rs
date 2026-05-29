@@ -4,8 +4,11 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use axum::{
+    body::Body,
     extract::FromRequestParts,
-    http::{request::Parts, StatusCode},
+    http::{request::Parts, Request, StatusCode},
+    middleware::Next,
+    response::IntoResponse,
     RequestPartsExt,
 };
 use axum_extra::{
@@ -217,4 +220,40 @@ impl<S: Send + Sync> FromRequestParts<S> for ApiKeyAuth {
             }
         }
     }
+}
+
+/// 管理 API 认证中间件
+pub async fn require_admin_auth(
+    request: Request<Body>,
+    next: Next,
+) -> Result<axum::response::Response, axum::response::Response> {
+    let jwt_secret = request.extensions().get::<String>().cloned()
+        .ok_or_else(|| {
+            (StatusCode::INTERNAL_SERVER_ERROR,
+             axum::Json(serde_json::json!({"code": 500, "message": "JWT 配置缺失"})))
+                .into_response()
+        })?;
+
+    let token = request.headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or_else(|| {
+            (StatusCode::UNAUTHORIZED,
+             axum::Json(serde_json::json!({"code": 401, "message": "缺少认证令牌"})))
+                .into_response()
+        })?;
+
+    jsonwebtoken::decode::<Claims>(
+        token,
+        &jsonwebtoken::DecodingKey::from_secret(jwt_secret.as_bytes()),
+        &jsonwebtoken::Validation::default(),
+    )
+    .map_err(|_| {
+        (StatusCode::UNAUTHORIZED,
+         axum::Json(serde_json::json!({"code": 401, "message": "无效的认证令牌"})))
+            .into_response()
+    })?;
+
+    Ok(next.run(request).await)
 }

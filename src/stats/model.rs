@@ -379,7 +379,7 @@ fn flatten_and_filter(
                 supports_vision: modalities.map(|m| m.input.contains(&"image".to_string())),
                 supports_pdf_input: modalities.map(|m| m.input.contains(&"pdf".to_string())),
                 supports_prompt_caching: cost.cache_read.map(|_| true),
-                supports_system_messages: model.temperature,
+                supports_system_messages: None,
                 supports_tool_choice: model.tool_call,
             };
 
