@@ -128,7 +128,7 @@ pub async fn import(
     let mut result = ImportResult::default();
 
     for ch in &backup.data.channels {
-        match import_channel(&mut *tx, ch).await {
+        match import_channel(&mut tx, ch).await {
             Ok(true) => result.channels_imported += 1,
             Ok(false) => {}
             Err(e) => result.errors.push(format!("渠道 '{}': {}", ch.name, e)),
@@ -136,7 +136,7 @@ pub async fn import(
     }
 
     for key in &backup.data.api_keys {
-        match import_api_key(&mut *tx, key).await {
+        match import_api_key(&mut tx, key).await {
             Ok(true) => result.api_keys_imported += 1,
             Ok(false) => {}
             Err(e) => result
@@ -146,7 +146,7 @@ pub async fn import(
     }
 
     for s in &backup.data.settings {
-        match import_setting(&mut *tx, s).await {
+        match import_setting(&mut tx, s).await {
             Ok(true) => result.settings_imported += 1,
             Ok(false) => {}
             Err(e) => result.errors.push(format!("设置 '{}': {}", s.key, e)),
@@ -154,7 +154,7 @@ pub async fn import(
     }
 
     for g in &backup.data.groups {
-        match import_group(&mut *tx, g).await {
+        match import_group(&mut tx, g).await {
             Ok(true) => result.groups_imported += 1,
             Ok(false) => {}
             Err(e) => result.errors.push(format!("分组 '{}': {}", g.name, e)),
@@ -355,7 +355,7 @@ async fn import_channel(conn: &mut SqliteConnection, ch: &Channel) -> Result<boo
     .bind(ch.concurrency)
     .bind(&custom_headers)
     .bind(ch.enabled)
-    .execute(&mut *conn)
+    .execute(conn)
     .await
     .map_err(|e| e.to_string())?;
 
@@ -372,7 +372,7 @@ async fn import_api_key(conn: &mut SqliteConnection, key: &ApiKeyExport) -> Resu
     .bind(&key.name)
     .bind(&key.api_key)
     .bind(key.enabled)
-    .execute(&mut *conn)
+    .execute(conn)
     .await
     .map_err(|e| e.to_string())?;
 
@@ -385,7 +385,7 @@ async fn import_setting(conn: &mut SqliteConnection, s: &SettingExport) -> Resul
     )
     .bind(&s.value)
     .bind(&s.key)
-    .execute(&mut *conn)
+    .execute(conn)
     .await
     .map_err(|e| e.to_string())?;
 

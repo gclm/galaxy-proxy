@@ -19,7 +19,7 @@ jobs:
             runner: macos-latest
             artifact: darwin-arm64
           - target: x86_64-apple-darwin
-            runner: macos-latest-large
+            runner: macos-13
             artifact: darwin-x86_64
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-latest
