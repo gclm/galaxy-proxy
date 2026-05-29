@@ -3,7 +3,7 @@ import { useDebouncedValue } from '@/lib/hooks'
 import { formatDate } from '@/lib/utils'
 import { statsApi } from '@/api/stats'
 import { ENDPOINT_LABELS } from '@/api/types'
-import type { EndpointType, RequestLog, RequestLogDetail } from '@/api/types'
+import type { EndpointType, RequestLog, RequestLogDetail, ChannelAttempt } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -198,17 +198,18 @@ export function Logs() {
                 <th className="text-right px-4 py-3 font-medium">输入</th>
                 <th className="text-right px-4 py-3 font-medium">输出</th>
                 <th className="text-right px-4 py-3 font-medium">耗时</th>
+                <th className="text-right px-4 py-3 font-medium">TTFT</th>
                 <th className="text-right px-4 py-3 font-medium">成本</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={11} className="text-center py-12 text-muted-foreground">加载中...</td>
+                  <td colSpan={12} className="text-center py-12 text-muted-foreground">加载中...</td>
                 </tr>
               ) : logs.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="text-center py-12 text-muted-foreground">暂无请求日志</td>
+                  <td colSpan={12} className="text-center py-12 text-muted-foreground">暂无请求日志</td>
                 </tr>
               ) : (
                 logs.map((log) => (
@@ -264,6 +265,9 @@ export function Logs() {
                     <td className="px-4 py-3 text-right text-xs">{formatNumber(log.output_tokens)}</td>
                     <td className="px-4 py-3 text-right text-xs text-muted-foreground">
                       {formatLatency(log.latency_ms)}
+                    </td>
+                    <td className="px-4 py-3 text-right text-xs text-muted-foreground">
+                      {log.ttft_ms != null ? formatLatency(log.ttft_ms) : '-'}
                     </td>
                     <td className="px-4 py-3 text-right text-xs">{formatCost(log.cost)}</td>
                   </tr>
@@ -332,6 +336,18 @@ export function Logs() {
                   <Zap className="h-3.5 w-3.5 text-amber-500" />
                   <span>耗时 {formatLatency(detailLog.latency_ms)}</span>
                 </div>
+                {detailLog.ttft_ms != null && (
+                  <div className="flex items-center gap-1.5">
+                    <Zap className="h-3.5 w-3.5 text-orange-500" />
+                    <span>TTFT {formatLatency(detailLog.ttft_ms)}</span>
+                  </div>
+                )}
+                {detailLog.attempts && detailLog.attempts.length > 1 && (
+                  <div className="flex items-center gap-1.5">
+                    <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span>{detailLog.attempts.length} 次尝试</span>
+                  </div>
+                )}
                 <div className="flex items-center gap-1.5">
                   <ArrowDownToLine className="h-3.5 w-3.5 text-green-500" />
                   <span>输入 {formatNumber(detailLog.input_tokens)}</span>
@@ -379,6 +395,36 @@ export function Logs() {
                       </div>
                       <pre className="text-xs text-destructive whitespace-pre-wrap break-all leading-relaxed">{detailLog.error_message}</pre>
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 重试链 */}
+              {logDetail?.attempts && logDetail.attempts.length > 0 && (
+                <div className="mx-6 mt-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-sm font-medium">重试链路</span>
+                    <span className="text-xs text-muted-foreground">({logDetail.attempts.length} 次尝试)</span>
+                  </div>
+                  <div className="space-y-1">
+                    {logDetail.attempts.map((a: ChannelAttempt, i: number) => (
+                      <div key={i} className="flex items-center gap-3 text-xs px-3 py-2 rounded-lg bg-muted/50">
+                        <span className="text-muted-foreground w-4 text-right">#{i + 1}</span>
+                        <span className="font-mono text-muted-foreground">{a.channel_id.slice(0, 8)}</span>
+                        <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-xs font-medium ${
+                          a.status === 'success'
+                            ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                            : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                        }`}>
+                          {a.status === 'success' ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+                          {a.status}
+                        </span>
+                        <span className="text-muted-foreground">{formatLatency(a.duration_ms)}</span>
+                        {a.error && (
+                          <span className="text-destructive truncate max-w-[300px]" title={a.error}>{a.error}</span>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}

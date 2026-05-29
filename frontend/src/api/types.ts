@@ -264,6 +264,14 @@ export interface InfraConfig {
 }
 
 // Request Log types
+export interface ChannelAttempt {
+  channel_id: string
+  channel_name: string | null
+  status: string
+  duration_ms: number
+  error: string | null
+}
+
 export interface RequestLog {
   id: string
   api_key_id: string | null
@@ -279,12 +287,14 @@ export interface RequestLog {
   cache_creation_tokens: number
   cost: number | null
   latency_ms: number | null
+  ttft_ms: number | null
   status_code: number | null
   error_message: string | null
   created_at: string
   endpoint_type: string | null
   request_type: string
   is_stream: boolean
+  attempts: ChannelAttempt[] | null
 }
 
 export interface RequestLogDetail extends RequestLog {
