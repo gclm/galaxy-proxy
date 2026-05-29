@@ -49,7 +49,7 @@ export function Dashboard() {
   const formatStat = (key: typeof statCards[number]['key']) => {
     if (!overview) return '0'
     if (key === 'requests') return (overview.total_requests ?? 0).toLocaleString()
-    if (key === 'tokens') return ((overview.total_input_tokens + overview.total_output_tokens) ?? 0).toLocaleString()
+    if (key === 'tokens') return (overview.total_input_tokens + overview.total_output_tokens).toLocaleString()
     return `$${(overview.total_cost ?? 0).toFixed(4)}`
   }
 
