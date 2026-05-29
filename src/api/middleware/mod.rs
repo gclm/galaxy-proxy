@@ -14,8 +14,9 @@ use axum_extra::{
     headers::{authorization::Bearer, Authorization},
     TypedHeader,
 };
-use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
+
+use crate::auth::decode_jwt;
 
 /// API Key 缓存
 #[derive(Clone)]
@@ -75,17 +76,8 @@ impl ApiKeyCache {
     }
 }
 
-/// JWT Claims
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Claims {
-    pub sub: String,
-    pub username: String,
-    pub exp: usize,
-    pub iat: usize,
-}
-
 /// 从请求中提取 Claims（管理 API 认证）
-pub struct AuthClaims(pub Claims);
+pub struct AuthClaims(pub crate::auth::Claims);
 
 impl<S: Send + Sync> FromRequestParts<S> for AuthClaims {
     type Rejection = (StatusCode, String);
@@ -108,15 +100,10 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthClaims {
             )
         })?;
 
-        // 验证 Token
-        let token_data = jsonwebtoken::decode::<Claims>(
-            bearer.token(),
-            &jsonwebtoken::DecodingKey::from_secret(jwt_secret.as_bytes()),
-            &jsonwebtoken::Validation::default(),
-        )
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "无效的认证令牌".to_string()))?;
+        let claims = decode_jwt(bearer.token(), jwt_secret)
+            .map_err(|_| (StatusCode::UNAUTHORIZED, "无效的认证令牌".to_string()))?;
 
-        Ok(AuthClaims(token_data.claims))
+        Ok(AuthClaims(claims))
     }
 }
 
@@ -243,11 +230,7 @@ pub async fn require_admin_auth(
                 .into_response()
         })?;
 
-    jsonwebtoken::decode::<Claims>(
-        token,
-        &jsonwebtoken::DecodingKey::from_secret(jwt_secret.as_bytes()),
-        &jsonwebtoken::Validation::default(),
-    )
+    decode_jwt(token, &jwt_secret)
     .map_err(|_| {
         (StatusCode::UNAUTHORIZED,
          axum::Json(serde_json::json!({"code": 401, "message": "无效的认证令牌"})))

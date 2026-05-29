@@ -53,17 +53,6 @@ pub async fn init(
     State(state): State<AuthState>,
     Json(req): Json<InitRequest>,
 ) -> Result<(StatusCode, Json<ApiResponse<AuthResponse>>), (StatusCode, Json<ApiError>)> {
-    // 检查是否已初始化
-    let count: i32 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
-        .fetch_one(&state.pool)
-        .await
-        .map_err(|e| ApiError::internal_error(e.to_string()))?;
-
-    if count > 0 {
-        return Err(ApiError::conflict("系统已初始化，无需重复操作"));
-    }
-
-    // 验证输入
     if req.username.len() < 3 {
         return Err(ApiError::bad_request("用户名至少 3 个字符"));
     }
@@ -71,23 +60,26 @@ pub async fn init(
         return Err(ApiError::bad_request("密码至少 8 个字符"));
     }
 
-    // 哈希密码
     let password_hash = PasswordService::hash_password(&req.password)
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
-    // 生成用户 ID
     let user_id = crate::api::response::generate_id();
 
-    // 插入用户
-    sqlx::query("INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?)")
-        .bind(&user_id)
-        .bind(&req.username)
-        .bind(&password_hash)
-        .execute(&state.pool)
-        .await
-        .map_err(|e| ApiError::internal_error(e.to_string()))?;
+    // INSERT ... WHERE NOT EXISTS 防止并发竞态创建多个管理员
+    let inserted = sqlx::query(
+        "INSERT INTO users (id, username, password_hash) SELECT ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM users)"
+    )
+    .bind(&user_id)
+    .bind(&req.username)
+    .bind(&password_hash)
+    .execute(&state.pool)
+    .await
+    .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
-    // 保存站点标题
+    if inserted.rows_affected() == 0 {
+        return Err(ApiError::conflict("系统已初始化，无需重复操作"));
+    }
+
     if let Some(site_title) = &req.site_title {
         sqlx::query(
             "INSERT OR REPLACE INTO settings (key, category, value, description) VALUES ('site.title', 'general', ?, '站点标题')",
@@ -98,7 +90,6 @@ pub async fn init(
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
     }
 
-    // 生成 Token
     let token = state
         .jwt_service
         .generate_token(&user_id, &req.username)
@@ -118,7 +109,6 @@ pub async fn login(
     State(state): State<AuthState>,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<ApiResponse<AuthResponse>>, (StatusCode, Json<ApiError>)> {
-    // 查询用户
     let user = sqlx::query_as::<_, (String, String, String)>(
         "SELECT id, username, password_hash FROM users WHERE username = ?",
     )
@@ -130,7 +120,6 @@ pub async fn login(
     let (user_id, username, password_hash) =
         user.ok_or_else(|| ApiError::unauthorized("用户名或密码错误"))?;
 
-    // 验证密码
     let valid = PasswordService::verify_password(&req.password, &password_hash)
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
@@ -138,7 +127,6 @@ pub async fn login(
         return Err(ApiError::unauthorized("用户名或密码错误"));
     }
 
-    // 生成 Token
     let token = state
         .jwt_service
         .generate_token(&user_id, &username)
@@ -166,14 +154,12 @@ pub async fn change_password(
     auth: crate::api::middleware::AuthClaims,
     Json(req): Json<ChangePasswordRequest>,
 ) -> Result<Json<ApiResponse<()>>, (StatusCode, Json<ApiError>)> {
-    // 查询当前密码
     let password_hash: String = sqlx::query_scalar("SELECT password_hash FROM users WHERE id = ?")
         .bind(&auth.0.sub)
         .fetch_one(&state.pool)
         .await
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
-    // 验证旧密码
     let valid = PasswordService::verify_password(&req.old_password, &password_hash)
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
@@ -181,16 +167,13 @@ pub async fn change_password(
         return Err(ApiError::unauthorized("旧密码错误"));
     }
 
-    // 验证新密码
     if req.new_password.len() < 8 {
         return Err(ApiError::bad_request("新密码至少 8 个字符"));
     }
 
-    // 哈希新密码
     let new_hash = PasswordService::hash_password(&req.new_password)
         .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
-    // 更新密码
     sqlx::query("UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
         .bind(&new_hash)
         .bind(&auth.0.sub)

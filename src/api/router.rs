@@ -1,5 +1,6 @@
 use axum::{
     body::Body,
+    extract::DefaultBodyLimit,
     http::Request,
     middleware,
     routing::{delete, get, post, put},
@@ -7,6 +8,7 @@ use axum::{
 };
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
+use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::api::handlers::admin::api_keys::{self, ApiKeyState};
@@ -154,6 +156,8 @@ pub async fn create_router(
         .layer(middleware::from_fn(require_admin_auth));
 
     Router::new()
+        // 请求体大小限制 50MB（多模态图片可能较大）
+        .layer(DefaultBodyLimit::max(50 * 1024 * 1024))
         // 健康检查（返回初始化状态）
         .route("/api/v1/health", get(health_check))
         // 代理 API 路由
@@ -183,6 +187,7 @@ pub async fn create_router(
             },
         ))
         // 中间件
+        .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
 }
 

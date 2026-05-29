@@ -1,14 +1,29 @@
 use chrono::{Duration, Utc};
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 
 /// JWT Claims
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
-    pub sub: String, // 用户 ID
+    pub sub: String,
     pub username: String,
-    pub exp: usize, // 过期时间
-    pub iat: usize, // 签发时间
+    pub exp: usize,
+    pub iat: usize,
+}
+
+/// 构建统一的 JWT Validation（HS256 only）
+pub fn jwt_validation() -> Validation {
+    Validation::new(Algorithm::HS256)
+}
+
+/// 解码并验证 JWT token
+pub fn decode_jwt(token: &str, secret: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
+    let token_data = decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &jwt_validation(),
+    )?;
+    Ok(token_data.claims)
 }
 
 /// JWT 服务
@@ -53,13 +68,7 @@ impl JwtService {
     /// 验证 Token
     #[allow(dead_code)]
     pub fn verify_token(&self, token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
-        let token_data = decode::<Claims>(
-            token,
-            &DecodingKey::from_secret(self.secret.as_bytes()),
-            &Validation::default(),
-        )?;
-
-        Ok(token_data.claims)
+        decode_jwt(token, &self.secret)
     }
 }
 

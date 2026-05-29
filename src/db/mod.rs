@@ -45,7 +45,8 @@ impl Database {
 
         // 对于文件数据库，使用 sqlite:{path} 格式
         let pool = SqlitePoolOptions::new()
-            .max_connections(5)
+            .max_connections(10)
+            .acquire_timeout(std::time::Duration::from_secs(5))
             .connect(database_url)
             .await?;
 

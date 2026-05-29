@@ -2,7 +2,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
+use sqlx::{SqlitePool, SqliteConnection};
 
 type DbResult<T> = Result<T, (StatusCode, Json<ApiError>)>;
 type ChannelRow = (
@@ -122,19 +122,21 @@ pub async fn import(
         )));
     }
 
-    let pool = &state.pool;
+    let mut tx = state.pool.begin().await
+        .map_err(|e| ApiError::internal_error(e.to_string()))?;
+
     let mut result = ImportResult::default();
 
     for ch in &backup.data.channels {
-        match import_channel(pool, ch).await {
+        match import_channel(&mut *tx, ch).await {
             Ok(true) => result.channels_imported += 1,
-            Ok(false) => {} // 已存在，跳过
+            Ok(false) => {}
             Err(e) => result.errors.push(format!("渠道 '{}': {}", ch.name, e)),
         }
     }
 
     for key in &backup.data.api_keys {
-        match import_api_key(pool, key).await {
+        match import_api_key(&mut *tx, key).await {
             Ok(true) => result.api_keys_imported += 1,
             Ok(false) => {}
             Err(e) => result
@@ -144,7 +146,7 @@ pub async fn import(
     }
 
     for s in &backup.data.settings {
-        match import_setting(pool, s).await {
+        match import_setting(&mut *tx, s).await {
             Ok(true) => result.settings_imported += 1,
             Ok(false) => {}
             Err(e) => result.errors.push(format!("设置 '{}': {}", s.key, e)),
@@ -152,12 +154,15 @@ pub async fn import(
     }
 
     for g in &backup.data.groups {
-        match import_group(pool, g).await {
+        match import_group(&mut *tx, g).await {
             Ok(true) => result.groups_imported += 1,
             Ok(false) => {}
             Err(e) => result.errors.push(format!("分组 '{}': {}", g.name, e)),
         }
     }
+
+    tx.commit().await
+        .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
     Ok(Json(ApiResponse::success(result)))
 }
@@ -327,7 +332,7 @@ async fn fetch_settings(pool: &SqlitePool) -> Result<Vec<SettingExport>, (Status
 
 // ── 数据导入（返回 Ok(true)=已导入, Ok(false)=已存在跳过）──
 
-async fn import_channel(pool: &SqlitePool, ch: &Channel) -> Result<bool, String> {
+async fn import_channel(conn: &mut SqliteConnection, ch: &Channel) -> Result<bool, String> {
     let id = crate::api::response::generate_id();
     let api_keys = serde_json::to_string(&ch.api_keys).map_err(|e| e.to_string())?;
     let endpoints = serde_json::to_string(&ch.endpoints).map_err(|e| e.to_string())?;
@@ -350,14 +355,14 @@ async fn import_channel(pool: &SqlitePool, ch: &Channel) -> Result<bool, String>
     .bind(ch.concurrency)
     .bind(&custom_headers)
     .bind(ch.enabled)
-    .execute(pool)
+    .execute(&mut *conn)
     .await
     .map_err(|e| e.to_string())?;
 
     Ok(result.rows_affected() > 0)
 }
 
-async fn import_api_key(pool: &SqlitePool, key: &ApiKeyExport) -> Result<bool, String> {
+async fn import_api_key(conn: &mut SqliteConnection, key: &ApiKeyExport) -> Result<bool, String> {
     let id = crate::api::response::generate_id();
     let result = sqlx::query(
         r#"INSERT OR IGNORE INTO api_keys (id, name, api_key, enabled)
@@ -367,27 +372,27 @@ async fn import_api_key(pool: &SqlitePool, key: &ApiKeyExport) -> Result<bool, S
     .bind(&key.name)
     .bind(&key.api_key)
     .bind(key.enabled)
-    .execute(pool)
+    .execute(&mut *conn)
     .await
     .map_err(|e| e.to_string())?;
 
     Ok(result.rows_affected() > 0)
 }
 
-async fn import_setting(pool: &SqlitePool, s: &SettingExport) -> Result<bool, String> {
+async fn import_setting(conn: &mut SqliteConnection, s: &SettingExport) -> Result<bool, String> {
     let result = sqlx::query(
         "UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
     )
     .bind(&s.value)
     .bind(&s.key)
-    .execute(pool)
+    .execute(&mut *conn)
     .await
     .map_err(|e| e.to_string())?;
 
     Ok(result.rows_affected() > 0)
 }
 
-async fn import_group(pool: &SqlitePool, g: &GroupExport) -> Result<bool, String> {
+async fn import_group(conn: &mut SqliteConnection, g: &GroupExport) -> Result<bool, String> {
     let id = crate::api::response::generate_id();
 
     let result = sqlx::query(
@@ -401,7 +406,7 @@ async fn import_group(pool: &SqlitePool, g: &GroupExport) -> Result<bool, String
     .bind(g.max_retries)
     .bind(g.first_token_timeout_secs)
     .bind(g.enabled)
-    .execute(pool)
+    .execute(&mut *conn)
     .await
     .map_err(|e| e.to_string())?;
 
@@ -413,7 +418,7 @@ async fn import_group(pool: &SqlitePool, g: &GroupExport) -> Result<bool, String
         let channel_id: Option<String> =
             sqlx::query_scalar("SELECT id FROM channels WHERE name = ?")
                 .bind(&item.channel_name)
-                .fetch_optional(pool)
+                .fetch_optional(&mut *conn)
                 .await
                 .map_err(|e| e.to_string())?;
 
@@ -432,7 +437,7 @@ async fn import_group(pool: &SqlitePool, g: &GroupExport) -> Result<bool, String
         .bind(&item.model_name)
         .bind(item.priority)
         .bind(item.weight)
-        .execute(pool)
+        .execute(&mut *conn)
         .await
         .map_err(|e| e.to_string())?;
     }
