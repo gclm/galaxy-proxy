@@ -1,18 +1,41 @@
+use std::io::Write;
 use std::path::PathBuf;
 
 #[tokio::test]
 async fn test_config_load() {
-    let config_path = PathBuf::from("config.toml");
-    if !config_path.exists() {
-        // CI 环境没有 config.toml，跳过
-        eprintln!("skipping test_config_load: config.toml not found");
-        return;
-    }
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config.toml");
+    let mut f = std::fs::File::create(&config_path).unwrap();
+    write!(f, r#"
+[server]
+host = "0.0.0.0"
+port = 9090
+
+[database]
+path = "test/galaxy.db"
+
+[auth]
+jwt_secret = "test-secret-for-ci"
+token_expiry_hours = 24
+
+[logging]
+level = "debug"
+format = "compact"
+file = false
+file_path = "test/galaxy.log"
+
+[pricing]
+cache_path = "test/pricing_cache.json"
+refresh_interval_hours = 24
+providers = ["openai"]
+"#).unwrap();
+    drop(f);
+
     let config = galaxy_router::config::AppConfig::load(&config_path).unwrap();
 
-    assert_eq!(config.server.host, "127.0.0.1");
-    assert_eq!(config.server.port, 8080);
-    assert_eq!(config.database.path, "data/galaxy.db");
+    assert_eq!(config.server.host, "0.0.0.0");
+    assert_eq!(config.server.port, 9090);
+    assert_eq!(config.database.path, "test/galaxy.db");
 }
 
 #[tokio::test]
