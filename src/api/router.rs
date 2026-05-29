@@ -203,7 +203,7 @@ async fn health_check(
 
     Json(json!({
         "status": "ok",
-        "version": env!("CARGO_PKG_VERSION"),
+        "version": env!("GALAXY_BUILD_VERSION"),
         "needs_setup": needs_setup
     }))
 }

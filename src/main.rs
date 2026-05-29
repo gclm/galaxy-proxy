@@ -19,7 +19,7 @@ use db::Database;
 
 /// Galaxy Router - AI 协议互转代理网关
 #[derive(Parser, Debug)]
-#[command(name = "galaxy-router", version, about)]
+#[command(name = "galaxy-router", version = env!("GALAXY_BUILD_VERSION"), about)]
 struct Cli {
     /// 配置文件路径
     #[arg(short, long, default_value = "config.toml")]

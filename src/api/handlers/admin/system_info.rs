@@ -43,7 +43,7 @@ pub async fn get(
     let uptime_secs = state.start_time.elapsed().as_secs();
 
     Ok(Json(ApiResponse::success(SystemInfo {
-        version: env!("CARGO_PKG_VERSION"),
+        version: env!("GALAXY_BUILD_VERSION"),
         uptime_secs,
         channel_count,
         group_count,
