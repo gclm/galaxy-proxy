@@ -26,6 +26,12 @@ pub struct ProxyCache {
     model_index: Arc<RwLock<HashMap<String, Vec<String>>>>,
 }
 
+impl Default for ProxyCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProxyCache {
     pub fn new() -> Self {
         Self {
@@ -45,8 +51,8 @@ impl ProxyCache {
     pub async fn set_channel(&self, channel: ChannelInfo) {
         let mut cache = self.channels.write().await;
 
-        if cache.len() >= CACHE_MAX_SIZE {
-            if let Some(oldest_key) = cache.keys().next().cloned() {
+        if cache.len() >= CACHE_MAX_SIZE
+            && let Some(oldest_key) = cache.keys().next().cloned() {
                 let mut idx = self.model_index.write().await;
                 if let Some(old_ch) = cache.get(&oldest_key) {
                     for model in &old_ch.models {
@@ -57,7 +63,6 @@ impl ProxyCache {
                 }
                 cache.remove(&oldest_key);
             }
-        }
 
         // 更新模型反向索引
         {
@@ -103,11 +108,10 @@ impl ProxyCache {
     /// 设置分组缓存（超过限制时清除最旧条目）
     pub async fn set_group(&self, group: GroupInfo) {
         let mut cache = self.groups.write().await;
-        if cache.len() >= CACHE_MAX_SIZE {
-            if let Some(oldest_key) = cache.keys().next().cloned() {
+        if cache.len() >= CACHE_MAX_SIZE
+            && let Some(oldest_key) = cache.keys().next().cloned() {
                 cache.remove(&oldest_key);
             }
-        }
         cache.insert(group.name.clone(), group);
     }
 
@@ -301,6 +305,7 @@ impl ProxyState {
     }
 
     /// 选择渠道和端点（精确匹配端点类型）
+    #[allow(dead_code)]
     pub async fn select_channel(
         &self,
         model: &str,
@@ -371,8 +376,8 @@ impl ProxyState {
         };
 
         // 3. 从分组中选择渠道
-        if let Some(group) = group {
-            if let Ok(item) = self.select_group_item(&group, exclude_ids).await {
+        if let Some(group) = group
+            && let Ok(item) = self.select_group_item(&group, exclude_ids).await {
                 let channel = self.get_channel(&item.channel_id).await?;
                 if let Some(endpoint) = find_endpoint(&channel) {
                     if let Some(hash) = session_hash {
@@ -382,7 +387,6 @@ impl ProxyState {
                     return Ok(SelectionResult { channel, target_model, endpoint });
                 }
             }
-        }
 
         // 4. 直接查找渠道
         let channel = self.find_channel_by_model(model, exclude_ids, |ch| find_endpoint(ch).is_some()).await?;
@@ -587,11 +591,10 @@ impl ProxyState {
                 if exclude_ids.contains(cid) {
                     continue;
                 }
-                if let Ok(channel) = self.get_channel(cid).await {
-                    if endpoint_filter(&channel) {
+                if let Ok(channel) = self.get_channel(cid).await
+                    && endpoint_filter(&channel) {
                         return Ok(channel);
                     }
-                }
             }
         }
 
@@ -833,11 +836,10 @@ async fn prepare_proxy_request(
     let url = format!("{}{}", selection.endpoint.base_url, upstream_endpoint.path());
 
     for header in &selection.channel.custom_headers {
-        if let Ok(name) = reqwest::header::HeaderName::from_bytes(header.key.as_bytes()) {
-            if let Ok(value) = header.value.parse() {
+        if let Ok(name) = reqwest::header::HeaderName::from_bytes(header.key.as_bytes())
+            && let Ok(value) = header.value.parse() {
                 reqwest_headers.insert(name, value);
             }
-        }
     }
 
     Ok(PreparedProxyRequest {
@@ -1072,22 +1074,19 @@ async fn execute_proxy_stream(
                             }
 
                             // 尝试提取 usage
-                            if let Ok(text) = std::str::from_utf8(&event_bytes) {
-                                if let Some(usage) = extract_usage_from_sse(text, &upstream_endpoint_clone) {
+                            if let Ok(text) = std::str::from_utf8(&event_bytes)
+                                && let Some(usage) = extract_usage_from_sse(text, &upstream_endpoint_clone) {
                                     last_usage = Some(usage);
                                 }
-                            }
 
                             // 转换事件
                             match outbound.transform_stream_event(&event_bytes) {
                                 Ok(Some(llm_stream)) => {
-                                    if let Some(choice) = llm_stream.first_choice() {
-                                        if let Some(crate::protocol::model::Content::Text(t)) = &choice.delta.content {
-                                            if !t.is_empty() {
+                                    if let Some(choice) = llm_stream.first_choice()
+                                        && let Some(crate::protocol::model::Content::Text(t)) = &choice.delta.content
+                                            && !t.is_empty() {
                                                 collected_text.push_str(t);
                                             }
-                                        }
-                                    }
                                     match inbound.transform_stream_event(&llm_stream) {
                                         Ok(converted) => {
                                             yield Ok::<_, std::convert::Infallible>(Bytes::from(converted));
@@ -1115,19 +1114,14 @@ async fn execute_proxy_stream(
 
             // 处理缓冲区中剩余的数据
             if !buffer.is_empty() && !buffer.iter().all(|b| *b == b'\n' || *b == b'\r') {
-                if let Ok(text) = std::str::from_utf8(&buffer) {
-                    if let Some(usage) = extract_usage_from_sse(text, &upstream_endpoint_clone) {
+                if let Ok(text) = std::str::from_utf8(&buffer)
+                    && let Some(usage) = extract_usage_from_sse(text, &upstream_endpoint_clone) {
                         last_usage = Some(usage);
                     }
-                }
-                match outbound.transform_stream_event(&buffer) {
-                    Ok(Some(llm_stream)) => {
-                        if let Ok(converted) = inbound.transform_stream_event(&llm_stream) {
-                            yield Ok(Bytes::from(converted));
-                        }
+                if let Ok(Some(llm_stream)) = outbound.transform_stream_event(&buffer)
+                    && let Ok(converted) = inbound.transform_stream_event(&llm_stream) {
+                        yield Ok(Bytes::from(converted));
                     }
-                    _ => {}
-                }
             }
         } else {
             // 直通模式
@@ -1420,13 +1414,11 @@ fn extract_usage_from_sse(text: &str, endpoint_type: &EndpointType) -> Option<se
         EndpointType::OpenAiChat | EndpointType::OpenAiResponse => {
             // OpenAI 格式: data: {"usage": {...}}
             for line in text.lines() {
-                if let Some(data) = line.strip_prefix("data: ") {
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
-                        if parsed.get("usage").is_some() {
+                if let Some(data) = line.strip_prefix("data: ")
+                    && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data)
+                        && parsed.get("usage").is_some() {
                             return Some(parsed);
                         }
-                    }
-                }
             }
             None
         }
@@ -1435,19 +1427,17 @@ fn extract_usage_from_sse(text: &str, endpoint_type: &EndpointType) -> Option<se
             let mut event_type = "";
             let mut data = "";
             for line in text.lines() {
-                if line.starts_with("event: ") {
-                    event_type = &line[7..];
-                } else if line.starts_with("data: ") {
-                    data = &line[6..];
+                if let Some(stripped) = line.strip_prefix("event: ") {
+                    event_type = stripped;
+                } else if let Some(stripped) = line.strip_prefix("data: ") {
+                    data = stripped;
                 }
             }
-            if event_type == "message_delta" {
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
-                    if parsed.get("usage").is_some() {
+            if event_type == "message_delta"
+                && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data)
+                    && parsed.get("usage").is_some() {
                         return Some(parsed);
                     }
-                }
-            }
             None
         }
         _ => None,
@@ -1461,27 +1451,22 @@ fn collect_sse_text(text: &str, endpoint_type: &EndpointType, output: &mut Strin
             for line in text.lines() {
                 if let Some(data) = line.strip_prefix("data: ") {
                     if data == "[DONE]" { continue; }
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
-                        if let Some(content) = parsed["choices"][0]["delta"]["content"].as_str() {
-                            if !content.is_empty() {
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data)
+                        && let Some(content) = parsed["choices"][0]["delta"]["content"].as_str()
+                            && !content.is_empty() {
                                 output.push_str(content);
                             }
-                        }
-                    }
                 }
             }
         }
         EndpointType::Anthropic => {
             for line in text.lines() {
-                if let Some(data) = line.strip_prefix("data: ") {
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
-                        if parsed["type"] == "content_block_delta" {
-                            if let Some(t) = parsed["delta"]["text"].as_str() {
+                if let Some(data) = line.strip_prefix("data: ")
+                    && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data)
+                        && parsed["type"] == "content_block_delta"
+                            && let Some(t) = parsed["delta"]["text"].as_str() {
                                 output.push_str(t);
                             }
-                        }
-                    }
-                }
             }
         }
         _ => {}

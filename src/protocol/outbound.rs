@@ -37,6 +37,7 @@ pub trait Outbound: Send + Sync {
 
 /// 出站错误
 #[derive(Debug, thiserror::Error)]
+#[allow(clippy::enum_variant_names)]
 pub enum OutboundError {
     #[error("转换请求失败: {0}")]
     TransformError(String),

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { apiKeysApi } from '@/api/api-keys'
 import { statsApi } from '@/api/stats'
 import type { ApiKey, RequestLog, EndpointType } from '@/api/types'
@@ -31,7 +31,7 @@ function buildRequestConfig(
   model: string,
   prompt: string,
   stream: boolean,
-) {
+): { path: string; headers: Record<string, string>; body: Record<string, unknown> } {
   const defaultPrompt = prompt || 'Hello! Please introduce yourself briefly.'
 
   switch (protocol) {
@@ -151,7 +151,7 @@ export function Playground() {
       if (data.data) {
         const names = data.data.map((m: { id: string }) => m.id).sort()
         setModels(names)
-        setSelectedModel((prev) => (prev && names.includes(prev) ? prev : names[0] ?? ''))
+        setSelectedModel((prev) => (prev && names.includes(prev) ? prev : names[0]))
       }
     } catch {
       setModels([])

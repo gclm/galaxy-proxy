@@ -115,11 +115,10 @@ fn inject_custom_headers(
 ) -> reqwest::RequestBuilder {
     let mut builder = req_builder;
     for header in headers {
-        if let Ok(name) = reqwest::header::HeaderName::from_bytes(header.key.as_bytes()) {
-            if let Ok(value) = header.value.parse::<reqwest::header::HeaderValue>() {
+        if let Ok(name) = reqwest::header::HeaderName::from_bytes(header.key.as_bytes())
+            && let Ok(value) = header.value.parse::<reqwest::header::HeaderValue>() {
                 builder = builder.header(name, value);
             }
-        }
     }
     builder
 }
@@ -185,11 +184,10 @@ pub async fn test_model(
 
     req_builder = inject_custom_headers(req_builder, &custom_headers);
 
-    if let Some(ua) = &req.user_agent {
-        if !ua.is_empty() {
+    if let Some(ua) = &req.user_agent
+        && !ua.is_empty() {
             req_builder = req_builder.header("User-Agent", ua.as_str());
         }
-    }
 
     let resp = req_builder
         .json(&body)

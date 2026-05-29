@@ -3,6 +3,11 @@ use axum::{
     http::StatusCode,
     Json,
 };
+
+type ChannelRow = (
+    String, String, String, String, String,
+    Option<i32>, Option<i32>, i32, i32, i32, String, bool, String, String,
+);
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
@@ -188,7 +193,7 @@ pub async fn list(
 
     let items: Vec<Channel> = rows
         .iter()
-        .map(|row| row_to_channel_from_row(row))
+        .map(row_to_channel_from_row)
         .collect();
 
     Ok(Json(ApiResponse::success(PaginatedResponse { items, total })))
@@ -197,13 +202,12 @@ pub async fn list(
 fn push_where(builder: &mut sqlx::QueryBuilder<sqlx::Sqlite>, query: &ListChannelsQuery) -> bool {
     let mut has_where = false;
 
-    if let Some(ref search) = query.search {
-        if !search.is_empty() {
+    if let Some(ref search) = query.search
+        && !search.is_empty() {
             builder.push(" WHERE name LIKE ");
             builder.push_bind(format!("%{}%", search));
             has_where = true;
         }
-    }
     if let Some(ref status) = query.status {
         let enabled_val = match status.as_str() {
             "enabled" => Some(true),
@@ -425,7 +429,7 @@ async fn get_channel_by_id(
 }
 
 fn row_to_channel(
-    (id, name, api_keys_str, endpoints_str, models_str, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, custom_headers_str, enabled, created_at, updated_at): (String, String, String, String, String, Option<i32>, Option<i32>, i32, i32, i32, String, bool, String, String),
+    (id, name, api_keys_str, endpoints_str, models_str, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, custom_headers_str, enabled, created_at, updated_at): ChannelRow,
 ) -> Channel {
     let api_keys: Vec<String> = serde_json::from_str(&api_keys_str).unwrap_or_default();
     let endpoints: Vec<EndpointConfig> = serde_json::from_str(&endpoints_str).unwrap_or_default();

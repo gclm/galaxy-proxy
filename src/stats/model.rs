@@ -4,6 +4,14 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+type ModelInfoRow = (
+    String, String, String,
+    Option<f64>, Option<f64>, Option<f64>, Option<f64>,
+    Option<i64>, Option<i64>,
+    Option<bool>, Option<bool>, Option<bool>, Option<bool>,
+    Option<bool>, Option<bool>, Option<bool>,
+);
+
 /// 模型信息（定价 + 元数据）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelInfo {
@@ -398,13 +406,7 @@ fn row_to_info(
      supports_function_calling, supports_reasoning, supports_vision,
      supports_pdf_input, supports_prompt_caching,
      supports_system_messages, supports_tool_choice,
-    ): (
-        String, String, String,
-        Option<f64>, Option<f64>, Option<f64>, Option<f64>,
-        Option<i64>, Option<i64>,
-        Option<bool>, Option<bool>, Option<bool>, Option<bool>,
-        Option<bool>, Option<bool>, Option<bool>,
-    ),
+    ): ModelInfoRow,
 ) -> ModelInfo {
     ModelInfo {
         model, provider, mode,

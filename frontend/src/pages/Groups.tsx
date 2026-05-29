@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { groupsApi, type GroupListParams } from '@/api/groups'
 import { channelsApi } from '@/api/channels'
 import type { Channel, Group, CreateGroupRequest } from '@/api/types'
@@ -75,8 +75,6 @@ export function Groups() {
   useEffect(() => {
     channelsApi.list().then(res => setChannels(res.items)).catch(console.error)
   }, [])
-
-  const channelMap = useMemo(() => new Map(channels.map(ch => [ch.id, ch])), [channels])
 
   const handleCreate = async (data: CreateGroupRequest) => {
     await groupsApi.create(data)

@@ -235,9 +235,9 @@ function ModelEditDialog({ model, onSave, onClose }: {
           <div className="flex flex-wrap gap-2">
             {CAPABILITY_KEYS.map((key) => (
                 <button key={key} type="button"
-                  onClick={() => setDraft({ ...draft, [key]: draft[key] === true ? null : true })}
+                  onClick={() => setDraft({ ...draft, [key]: (draft as Record<string, unknown>)[key] === true ? null : true })}
                   className={`text-xs px-2 py-1 rounded border transition-colors ${
-                    draft[key] === true
+                    (draft as Record<string, unknown>)[key] === true
                       ? 'bg-primary text-primary-foreground border-primary'
                       : 'bg-card text-muted-foreground border-border'
                   }`}>

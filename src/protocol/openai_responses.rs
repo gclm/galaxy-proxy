@@ -352,10 +352,10 @@ impl Outbound for OpenAiResponsesOutbound {
         let mut data = "";
 
         for line in &lines {
-            if line.starts_with("event: ") {
-                event_type = &line[7..];
-            } else if line.starts_with("data: ") {
-                data = &line[6..];
+            if let Some(stripped) = line.strip_prefix("event: ") {
+                event_type = stripped;
+            } else if let Some(stripped) = line.strip_prefix("data: ") {
+                data = stripped;
             }
         }
 

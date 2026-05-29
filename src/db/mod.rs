@@ -44,15 +44,9 @@ impl Database {
             }
 
         // 对于文件数据库，使用 sqlite:{path} 格式
-        let connect_url = if database_url.starts_with("sqlite:") && !database_url.contains("?") {
-            database_url
-        } else {
-            database_url
-        };
-
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
-            .connect(connect_url)
+            .connect(database_url)
             .await?;
 
         let db = Self { pool };

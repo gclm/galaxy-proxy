@@ -23,7 +23,7 @@ pub async fn serve(req: Request<Body>) -> Response<Body> {
     }
 
     // SPA fallback: 返回 index.html
-    let file_path = if path == "/" || path == "" || !path.contains('.') {
+    let file_path = if path == "/" || path.is_empty() || !path.contains('.') {
         FALLBACK
     } else {
         path.trim_start_matches('/')
@@ -32,15 +32,14 @@ pub async fn serve(req: Request<Body>) -> Response<Body> {
     let asset = StaticAssets::get(file_path);
     let Some(asset) = asset else {
         // 尝试 fallback 到 index.html
-        if file_path != FALLBACK {
-            if let Some(index) = StaticAssets::get(FALLBACK) {
+        if file_path != FALLBACK
+            && let Some(index) = StaticAssets::get(FALLBACK) {
                 return Response::builder()
                     .status(StatusCode::OK)
                     .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
                     .body(Body::from(index.data))
                     .unwrap();
             }
-        }
         return Response::builder()
             .status(StatusCode::NOT_FOUND)
             .body(Body::empty())

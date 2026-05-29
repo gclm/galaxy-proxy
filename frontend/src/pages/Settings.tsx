@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { authApi, settingsApi, backupApi } from '@/api'
-import type { SettingItem, InfraConfig, ImportResult, ResetResult } from '@/api/backup'
+import type { SettingItem, InfraConfig } from '@/api/types'
+import type { ImportResult, ResetResult } from '@/api/backup'
 import { Button } from '@/components/ui/button'
 import { useAuthStore } from '@/stores/auth'
 import { User, Shield, TrendingUp, Sliders, Server, Database, Globe } from 'lucide-react'

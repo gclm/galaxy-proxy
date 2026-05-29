@@ -109,7 +109,7 @@ enum FetchError {
 
 impl From<reqwest::Error> for FetchError {
     fn from(e: reqwest::Error) -> Self {
-        if e.status().map_or(false, |s| s == 401 || s == 403) {
+        if e.status().is_some_and(|s| s == 401 || s == 403) {
             FetchError::AuthFailed
         } else if let Some(status) = e.status() {
             FetchError::Http(status)

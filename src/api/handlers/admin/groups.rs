@@ -162,13 +162,12 @@ pub async fn list(
 fn push_where(builder: &mut sqlx::QueryBuilder<sqlx::Sqlite>, query: &ListGroupsQuery) -> bool {
     let mut has_where = false;
 
-    if let Some(ref search) = query.search {
-        if !search.is_empty() {
+    if let Some(ref search) = query.search
+        && !search.is_empty() {
             builder.push(" WHERE name LIKE ");
             builder.push_bind(format!("%{}%", search));
             has_where = true;
         }
-    }
     if let Some(ref status) = query.status {
         let enabled_val = match status.as_str() {
             "enabled" => Some(true),

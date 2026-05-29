@@ -103,7 +103,7 @@ pub async fn update(
         .model_registry
         .set_model_info(info.clone())
         .await
-        .map_err(|e| ApiError::internal_error(e))?;
+        .map_err(ApiError::internal_error)?;
 
     Ok(Json(ApiResponse::success(info)))
 }

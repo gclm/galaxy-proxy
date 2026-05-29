@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { channelsApi, type ChannelListParams } from '@/api/channels'
-import type { Channel, CreateChannelRequest, EndpointType } from '@/api/types'
+import type { Channel, CreateChannelRequest } from '@/api/types'
 import { ENDPOINT_LABELS } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/StatusBadge'

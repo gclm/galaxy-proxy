@@ -4,6 +4,13 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
+type DbResult<T> = Result<T, (StatusCode, Json<ApiError>)>;
+type ChannelRow = (
+    String, String, String, String, String,
+    Option<i32>, Option<i32>, i32, i32, i32, String, bool, String, String,
+);
+type GroupRow = (String, String, Option<String>, bool, i32, i32, bool);
+
 use crate::api::handlers::admin::channels::Channel;
 use crate::api::handlers::admin::channels::CustomHeader;
 use crate::api::{ApiError, ApiResponse};
@@ -210,11 +217,8 @@ pub async fn reset(
 
 // ── 数据读取 ──
 
-async fn fetch_channels(pool: &SqlitePool) -> Result<Vec<Channel>, (StatusCode, Json<ApiError>)> {
-    let rows: Vec<(
-        String, String, String, String, String,
-        Option<i32>, Option<i32>, i32, i32, i32, String, bool, String, String,
-    )> = sqlx::query_as(
+async fn fetch_channels(pool: &SqlitePool) -> DbResult<Vec<Channel>> {
+    let rows: Vec<ChannelRow> = sqlx::query_as(
         "SELECT id, name, api_keys, endpoints, models, rate_limit_rpm, rate_limit_tpm, failure_threshold, blacklist_minutes, concurrency, custom_headers, enabled, created_at, updated_at FROM channels ORDER BY created_at",
     )
     .fetch_all(pool)
@@ -246,8 +250,8 @@ async fn fetch_channels(pool: &SqlitePool) -> Result<Vec<Channel>, (StatusCode, 
         .collect())
 }
 
-async fn fetch_groups(pool: &SqlitePool) -> Result<Vec<GroupExport>, (StatusCode, Json<ApiError>)> {
-    let rows: Vec<(String, String, Option<String>, bool, i32, i32, bool)> = sqlx::query_as(
+async fn fetch_groups(pool: &SqlitePool) -> DbResult<Vec<GroupExport>> {
+    let rows: Vec<GroupRow> = sqlx::query_as(
         "SELECT id, name, match_regex, retry_enabled, max_retries, first_token_timeout_secs, enabled FROM groups ORDER BY created_at",
     )
     .fetch_all(pool)
