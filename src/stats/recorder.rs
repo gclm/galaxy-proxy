@@ -15,6 +15,7 @@ pub struct ChannelAttempt {
     pub status: String,
     pub duration_ms: i64,
     pub error: Option<String>,
+    pub upstream_key_hint: Option<String>,
 }
 
 /// 记录请求
@@ -39,6 +40,7 @@ pub struct RequestRecord {
     pub request_content: Option<String>,
     pub response_content: Option<String>,
     pub is_stream: bool,
+    pub upstream_key_hint: Option<String>,
     pub attempts: Vec<ChannelAttempt>,
 }
 
@@ -64,8 +66,8 @@ impl StatsRecorder {
                 input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
                 cost, latency_ms, ttft_ms, status_code, error_message,
                 endpoint_type, request_type, request_content, response_content, is_stream,
-                attempts
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                upstream_key_hint, attempts
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&id)
@@ -88,6 +90,7 @@ impl StatsRecorder {
         .bind(&record.request_content)
         .bind(&record.response_content)
         .bind(record.is_stream)
+        .bind(&record.upstream_key_hint)
         .bind(&attempts_json)
         .execute(&self.pool)
         .await?;

@@ -15,27 +15,6 @@ pub struct StatsState {
 /// 渠道统计行类型
 type ChannelStatsRow = (String, String, i32, i32, i32, i32, i32, f64);
 
-/// 用量日志
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[allow(dead_code)]
-pub struct UsageLog {
-    pub id: String,
-    pub api_key_id: Option<String>,
-    pub channel_id: Option<String>,
-    pub group_id: Option<String>,
-    pub requested_model: String,
-    pub actual_model: Option<String>,
-    pub input_tokens: i32,
-    pub output_tokens: i32,
-    pub cache_read_tokens: i32,
-    pub cache_creation_tokens: i32,
-    pub cost: Option<f64>,
-    pub latency_ms: Option<i32>,
-    pub status_code: Option<i32>,
-    pub error_message: Option<String>,
-    pub created_at: String,
-}
-
 /// 每日统计
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
 pub struct UsageDaily {
@@ -126,7 +105,10 @@ pub struct UsageLogRow {
     pub endpoint_type: Option<String>,
     pub request_type: String,
     pub is_stream: bool,
-    pub attempts: Option<String>,
+    pub upstream_key_hint: Option<String>,
+    #[sqlx(skip)]
+    pub attempts: Option<serde_json::Value>,
+    pub raw_attempts: Option<String>,
 }
 
 /// 请求日志详情（含请求/响应内容）
@@ -156,7 +138,10 @@ pub struct UsageLogDetail {
     pub request_content: Option<String>,
     pub response_content: Option<String>,
     pub is_stream: bool,
-    pub attempts: Option<String>,
+    pub upstream_key_hint: Option<String>,
+    #[sqlx(skip)]
+    pub attempts: Option<serde_json::Value>,
+    pub raw_attempts: Option<String>,
 }
 
 /// 分页结果
@@ -397,8 +382,8 @@ impl StatsState {
 
         let mut count_builder = QueryBuilder::new("SELECT COUNT(*) FROM usage_logs ul WHERE 1=1");
         if let Some(ref model) = filter.model {
-            count_builder.push(" AND ul.requested_model LIKE ");
-            count_builder.push(format!("%{}%", model));
+            count_builder.push(" AND ul.requested_model = ");
+            count_builder.push(model.clone());
         }
         if let Some(ref cid) = filter.channel_id {
             count_builder.push(" AND ul.channel_id = ");
@@ -427,15 +412,15 @@ impl StatsState {
                       ul.input_tokens, ul.output_tokens,
                       ul.cache_read_tokens, ul.cache_creation_tokens,
                       ul.cost, ul.latency_ms, ul.ttft_ms, ul.status_code, ul.error_message, ul.created_at,
-                      ul.endpoint_type, ul.request_type, ul.is_stream, ul.attempts
+                      ul.endpoint_type, ul.request_type, ul.is_stream, ul.upstream_key_hint, ul.attempts as raw_attempts
                FROM usage_logs ul
                LEFT JOIN api_keys ak ON ul.api_key_id = ak.id
                LEFT JOIN channels c ON ul.channel_id = c.id
                WHERE 1=1"#,
         );
         if let Some(ref model) = filter.model {
-            data_builder.push(" AND ul.requested_model LIKE ");
-            data_builder.push(format!("%{}%", model));
+            data_builder.push(" AND ul.requested_model = ");
+            data_builder.push(model.clone());
         }
         if let Some(ref cid) = filter.channel_id {
             data_builder.push(" AND ul.channel_id = ");
@@ -459,10 +444,16 @@ impl StatsState {
         data_builder.push(" OFFSET ");
         data_builder.push(filter.offset);
 
-        let items: Vec<UsageLogRow> = data_builder.build_query_as().fetch_all(&self.pool).await?;
+        let rows: Vec<UsageLogRow> = data_builder.build_query_as().fetch_all(&self.pool).await?
+            .into_iter()
+            .map(|mut row: UsageLogRow| {
+                row.attempts = row.raw_attempts.take().and_then(|s| serde_json::from_str(&s).ok());
+                row
+            })
+            .collect();
 
         Ok(PagedResult {
-            items,
+            items: rows,
             total: total.0,
         })
     }
@@ -477,7 +468,7 @@ impl StatsState {
                       ul.cache_read_tokens, ul.cache_creation_tokens,
                       ul.cost, ul.latency_ms, ul.ttft_ms, ul.status_code, ul.error_message, ul.created_at,
                       ul.endpoint_type, ul.request_type,
-                      ul.request_content, ul.response_content, ul.is_stream, ul.attempts
+                      ul.request_content, ul.response_content, ul.is_stream, ul.upstream_key_hint, ul.attempts as raw_attempts
                FROM usage_logs ul
                LEFT JOIN api_keys ak ON ul.api_key_id = ak.id
                LEFT JOIN channels c ON ul.channel_id = c.id
@@ -485,8 +476,23 @@ impl StatsState {
         )
         .bind(id)
         .fetch_optional(&self.pool)
-        .await?;
+        .await?
+        .map(|mut r| {
+            r.attempts = r.raw_attempts.take().and_then(|s| serde_json::from_str(&s).ok());
+            r
+        });
 
         Ok(row)
+    }
+
+    /// 获取日志中出现过的不重复模型列表
+    pub async fn get_log_models(&self) -> Result<Vec<String>, sqlx::Error> {
+        let models = sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT requested_model FROM usage_logs ORDER BY requested_model",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(models)
     }
 }

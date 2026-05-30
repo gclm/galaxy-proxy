@@ -30,6 +30,7 @@ export const statsApi = {
   daily: (params?: StatsParams) => apiClient.get<DailyStats[]>('/stats/daily', statsQuery(params)),
   models: (params?: StatsParams) => apiClient.get<ModelStats[]>('/stats/models', statsQuery(params)),
   channels: (params?: StatsParams) => apiClient.get<ChannelStats[]>('/stats/channels', statsQuery(params)),
+  logModels: () => apiClient.get<string[]>('/stats/logs/models'),
   logs: (params?: LogsParams) => apiClient.get<{ items: RequestLog[]; total: number }>('/stats/logs', params as Record<string, string | number | undefined>),
   logDetail: (id: string) => apiClient.get<RequestLogDetail>(`/stats/logs/${id}`),
 }

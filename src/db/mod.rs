@@ -238,5 +238,21 @@ fn get_migrations() -> Vec<Migration> {
                 ALTER TABLE usage_logs ADD COLUMN attempts TEXT;
             "#,
         },
+        Migration {
+            version: 4,
+            name: "add_upstream_key_hint_to_usage_logs",
+            sql: "ALTER TABLE usage_logs ADD COLUMN upstream_key_hint TEXT;",
+        },
+        Migration {
+            version: 5,
+            name: "add_usage_logs_indexes",
+            sql: r#"
+                CREATE INDEX IF NOT EXISTS idx_usage_logs_channel_id ON usage_logs(channel_id);
+                CREATE INDEX IF NOT EXISTS idx_usage_logs_api_key_id ON usage_logs(api_key_id);
+                CREATE INDEX IF NOT EXISTS idx_usage_logs_requested_model ON usage_logs(requested_model);
+                CREATE INDEX IF NOT EXISTS idx_usage_daily_date ON usage_daily(date);
+                CREATE INDEX IF NOT EXISTS idx_usage_daily_channel_id ON usage_daily(channel_id);
+            "#,
+        },
     ]
 }

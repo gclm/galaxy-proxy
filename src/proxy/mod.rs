@@ -235,6 +235,7 @@ pub struct SelectionResult {
     pub channel: ChannelInfo,
     pub target_model: String,
     pub endpoint: EndpointConfig,
+    pub group_id: Option<String>,
 }
 
 /// 代理成功结果（非流式）
@@ -379,6 +380,7 @@ impl ProxyState {
                 channel,
                 target_model,
                 endpoint,
+                group_id: None,
             });
         }
 
@@ -402,6 +404,7 @@ impl ProxyState {
                     channel,
                     target_model,
                     endpoint,
+                    group_id: Some(group.id),
                 });
             }
         }
@@ -419,6 +422,7 @@ impl ProxyState {
                 channel,
                 target_model,
                 endpoint,
+                group_id: None,
             });
         }
 
@@ -724,6 +728,20 @@ impl ChannelInfo {
             .find(|e| e.enabled && e.endpoint_type == *endpoint_type)
             .cloned()
     }
+
+    /// 生成上游 Key 的显示 hint（优先 note，否则截断）
+    pub fn key_hint(&self, key: &str) -> String {
+        if let Some(ak) = self.api_keys.iter().find(|ak| ak.key == key && !ak.note.is_empty()) {
+            return ak.note.clone();
+        }
+        if key.len() > 12 {
+            format!("{}...{}", &key[..8], &key[key.len() - 4..])
+        } else if key.len() > 4 {
+            format!("{}...{}", &key[..3], &key[key.len() - 2..])
+        } else {
+            key.to_string()
+        }
+    }
 }
 
 /// 获取入站转换器（静态引用，避免堆分配）
@@ -934,6 +952,7 @@ struct AttemptStats {
     cache_creation: i32,
     cost: Option<f64>,
     error_message: Option<String>,
+    upstream_key_hint: String,
 }
 
 /// 保存单条请求日志（汇总所有尝试）
@@ -941,6 +960,7 @@ struct AttemptStats {
 async fn save_request_record(
     state: &ProxyState,
     api_key_id: Option<&str>,
+    group_id: Option<&str>,
     model: &str,
     request_content: Option<String>,
     response_content: Option<String>,
@@ -965,13 +985,14 @@ async fn save_request_record(
             },
             duration_ms: a.latency_ms,
             error: a.error_message.clone(),
+            upstream_key_hint: Some(a.upstream_key_hint.clone()),
         })
         .collect();
 
     let record = crate::stats::recorder::RequestRecord {
         api_key_id: api_key_id.map(|s| s.to_string()),
         channel_id: Some(last.channel_id.clone()),
-        group_id: None,
+        group_id: group_id.map(|s| s.to_string()),
         requested_model: model.to_string(),
         actual_model: Some(last.target_model.clone()),
         input_tokens: last.input_tokens,
@@ -992,6 +1013,7 @@ async fn save_request_record(
         request_content,
         response_content,
         is_stream,
+        upstream_key_hint: Some(last.upstream_key_hint.clone()),
         attempts: channel_attempts,
     };
 
@@ -1004,6 +1026,7 @@ async fn execute_proxy_request(
     state: &ProxyState,
     _api_key_id: Option<&str>,
     upstream_api_key: &str,
+    upstream_key_hint: &str,
     headers: &HeaderMap,
     body: &serde_json::Value,
     client_endpoint: &EndpointType,
@@ -1071,6 +1094,7 @@ async fn execute_proxy_request(
         } else {
             None
         },
+        upstream_key_hint: upstream_key_hint.to_string(),
     });
 
     if !status.is_success() {
@@ -1141,13 +1165,16 @@ pub async fn proxy_request(
         let selection =
             select_channel_for_proxy(state, headers, body, client_endpoint, &exclude_ids).await?;
         let channel_id = selection.channel.id.clone();
+        let group_id = selection.group_id.clone();
         let api_key_attempts = state.api_key_attempts(&selection.channel);
 
         for (key_idx, upstream_api_key) in api_key_attempts.iter().enumerate() {
+            let key_hint = selection.channel.key_hint(upstream_api_key);
             match execute_proxy_request(
                 state,
                 api_key_id,
                 upstream_api_key,
+                &key_hint,
                 headers,
                 body,
                 client_endpoint,
@@ -1160,6 +1187,7 @@ pub async fn proxy_request(
                     save_request_record(
                         state,
                         api_key_id,
+                        group_id.as_deref(),
                         &model,
                         request_content.clone(),
                         Some(String::from_utf8_lossy(&result.body).to_string()),
@@ -1203,6 +1231,7 @@ pub async fn proxy_request(
                     save_request_record(
                         state,
                         api_key_id,
+                        group_id.as_deref(),
                         &model,
                         request_content.clone(),
                         None,
@@ -1221,6 +1250,7 @@ pub async fn proxy_request(
     save_request_record(
         state,
         api_key_id,
+        None,
         &model,
         request_content,
         None,
@@ -1239,6 +1269,8 @@ async fn execute_proxy_stream(
     state: &ProxyState,
     api_key_id: Option<&str>,
     upstream_api_key: &str,
+    upstream_key_hint: String,
+    group_id: Option<String>,
     headers: &HeaderMap,
     body: &serde_json::Value,
     client_endpoint: &EndpointType,
@@ -1291,6 +1323,7 @@ async fn execute_proxy_stream(
             cache_creation: 0,
             cost: None,
             error_message: Some(response_body[..response_body.len().min(500)].to_string()),
+            upstream_key_hint: upstream_key_hint.clone(),
         });
 
         return Err(ProxyError::UpstreamError {
@@ -1337,6 +1370,7 @@ async fn execute_proxy_stream(
             cache_creation: 0,
             cost: None,
             error_message: Some(sanitized_error),
+            upstream_key_hint: upstream_key_hint.clone(),
         });
 
         return Err(ProxyError::UpstreamError {
@@ -1374,12 +1408,14 @@ async fn execute_proxy_stream(
     )>();
 
     // 提前 clone 给 spawn 任务使用（async_stream 会 move 原值）
+    let sc_channel_id = channel_id_clone.clone();
     let sc_model = model_clone.clone();
     let sc_target_model = target_model_clone.clone();
     let sc_client_endpoint = client_endpoint_clone.clone();
     let sc_needs_conversion = needs_conversion;
     let sc_api_key_id = api_key_id_clone.clone();
     let sc_request_content = request_content_clone.clone();
+    let sc_upstream_key_hint = upstream_key_hint.clone();
 
     let stats_recorder = state.stats_recorder.clone();
     let attempts_snapshot: Vec<crate::stats::recorder::ChannelAttempt> = attempts
@@ -1394,6 +1430,7 @@ async fn execute_proxy_stream(
             },
             duration_ms: a.latency_ms,
             error: a.error_message.clone(),
+            upstream_key_hint: Some(a.upstream_key_hint.clone()),
         })
         .collect();
 
@@ -1595,7 +1632,7 @@ async fn execute_proxy_stream(
             )) => {
                 let mut channel_attempts = attempts_snapshot;
                 channel_attempts.push(crate::stats::recorder::ChannelAttempt {
-                    channel_id: sc_model.clone(),
+                    channel_id: sc_channel_id.clone(),
                     channel_name: None,
                     status: if (200..400).contains(&status_code) {
                         "success".to_string()
@@ -1604,12 +1641,13 @@ async fn execute_proxy_stream(
                     },
                     duration_ms: latency_ms as i64,
                     error: error_message.clone(),
+                    upstream_key_hint: Some(sc_upstream_key_hint.clone()),
                 });
 
                 let record = crate::stats::recorder::RequestRecord {
                     api_key_id: sc_api_key_id,
-                    channel_id: None,
-                    group_id: None,
+                    channel_id: Some(sc_channel_id),
+                    group_id: group_id,
                     requested_model: sc_model,
                     actual_model: Some(sc_target_model),
                     input_tokens,
@@ -1630,6 +1668,7 @@ async fn execute_proxy_stream(
                     request_content: sc_request_content,
                     response_content,
                     is_stream: true,
+                    upstream_key_hint: Some(sc_upstream_key_hint),
                     attempts: channel_attempts,
                 };
                 stats_recorder.record_request(record).await
@@ -1695,13 +1734,17 @@ pub async fn proxy_stream(
         let selection =
             select_channel_for_proxy(state, headers, body, client_endpoint, &exclude_ids).await?;
         let channel_id = selection.channel.id.clone();
+        let group_id = selection.group_id.clone();
         let api_key_attempts = state.api_key_attempts(&selection.channel);
 
         for (key_idx, upstream_api_key) in api_key_attempts.iter().enumerate() {
+            let key_hint = selection.channel.key_hint(upstream_api_key);
             match execute_proxy_stream(
                 state,
                 api_key_id,
                 upstream_api_key,
+                key_hint,
+                group_id.clone(),
                 headers,
                 body,
                 client_endpoint,
@@ -1747,6 +1790,7 @@ pub async fn proxy_stream(
                     save_request_record(
                         state,
                         api_key_id,
+                        group_id.as_deref(),
                         &model,
                         request_content.clone(),
                         None,
@@ -1765,6 +1809,7 @@ pub async fn proxy_stream(
     save_request_record(
         state,
         api_key_id,
+        None,
         &model,
         request_content,
         None,

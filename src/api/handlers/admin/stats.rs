@@ -147,3 +147,16 @@ pub async fn log_detail(
         None => Err(ApiError::not_found("日志不存在")),
     }
 }
+
+/// 获取日志中不重复的模型列表（供前端筛选下拉框使用）
+pub async fn log_models(
+    State(state): State<StatsApiState>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, (StatusCode, Json<ApiError>)> {
+    let models = state
+        .stats
+        .get_log_models()
+        .await
+        .map_err(|e: sqlx::Error| ApiError::internal_error(e.to_string()))?;
+
+    Ok(Json(ApiResponse::success(serde_json::json!(models))))
+}

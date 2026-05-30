@@ -277,6 +277,7 @@ export interface ChannelAttempt {
   status: string
   duration_ms: number
   error: string | null
+  upstream_key_hint: string | null
 }
 
 export interface RequestLog {
@@ -301,6 +302,7 @@ export interface RequestLog {
   endpoint_type: string | null
   request_type: string
   is_stream: boolean
+  upstream_key_hint: string | null
   attempts: ChannelAttempt[] | null
 }
 

@@ -155,6 +155,7 @@ pub async fn create_router(
                 .route("/channels", get(stats::channels))
                 .route("/daily", get(stats::daily))
                 .route("/logs", get(stats::logs))
+                .route("/logs/models", get(stats::log_models))
                 .route("/logs/{id}", get(stats::log_detail))
                 .with_state(stats_state),
         )

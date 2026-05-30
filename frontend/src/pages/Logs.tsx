@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useDebouncedValue } from '@/lib/hooks'
 import { formatDate } from '@/lib/utils'
 import { statsApi } from '@/api/stats'
+import { channelsApi } from '@/api/channels'
 import { ENDPOINT_LABELS } from '@/api/types'
-import type { EndpointType, RequestLog, RequestLogDetail, ChannelAttempt } from '@/api/types'
+import type { EndpointType, RequestLog, RequestLogDetail, ChannelAttempt, Channel } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -12,7 +12,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
-  Search,
   RefreshCw,
   ChevronLeft,
   ChevronRight,
@@ -99,15 +98,22 @@ export function Logs() {
   const [page, setPage] = useState(1)
   const pageSize = 20
 
-  const [searchModelInput, setSearchModelInput] = useState('')
-  const searchModel = useDebouncedValue(searchModelInput)
+  const [modelOptions, setModelOptions] = useState<string[]>([])
+  const [channelOptions, setChannelOptions] = useState<Channel[]>([])
+  const [selectedModel, setSelectedModel] = useState('')
+  const [selectedChannel, setSelectedChannel] = useState('')
   const [status, setStatus] = useState('')
 
   const [detailLog, setDetailLog] = useState<RequestLog | null>(null)
   const [logDetail, setLogDetail] = useState<RequestLogDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
 
-  useEffect(() => { setPage(1) }, [searchModel])
+  useEffect(() => { setPage(1) }, [selectedModel, selectedChannel])
+
+  useEffect(() => {
+    statsApi.logModels().then(setModelOptions).catch(() => {})
+    channelsApi.list().then(res => setChannelOptions(res.items)).catch(() => {})
+  }, [])
 
   const fetchLogs = useCallback(async () => {
     setLoading(true)
@@ -115,7 +121,8 @@ export function Logs() {
       const data = await statsApi.logs({
         page,
         page_size: pageSize,
-        model: searchModel || undefined,
+        model: selectedModel || undefined,
+        channel_id: selectedChannel || undefined,
         status: status || undefined,
       })
       setLogs(data.items)
@@ -125,7 +132,7 @@ export function Logs() {
     } finally {
       setLoading(false)
     }
-  }, [page, searchModel, status])
+  }, [page, selectedModel, selectedChannel, status])
 
   useEffect(() => { fetchLogs() }, [fetchLogs])
 
@@ -158,16 +165,26 @@ export function Logs() {
 
       {/* 筛选栏 */}
       <div className="flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <input
-            type="text"
-            value={searchModelInput}
-            onChange={(e) => setSearchModelInput(e.target.value)}
-            placeholder="搜索模型名称..."
-            className="input pl-9"
-          />
-        </div>
+        <select
+          value={selectedModel}
+          onChange={(e) => { setSelectedModel(e.target.value); setPage(1) }}
+          className="input w-48"
+        >
+          <option value="">全部模型</option>
+          {modelOptions.map(m => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
+        <select
+          value={selectedChannel}
+          onChange={(e) => { setSelectedChannel(e.target.value); setPage(1) }}
+          className="input w-36"
+        >
+          <option value="">全部渠道</option>
+          {channelOptions.map(c => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
         <select
           value={status}
           onChange={(e) => { setStatus(e.target.value); setPage(1) }}
@@ -228,7 +245,7 @@ export function Logs() {
                       </div>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground text-xs">{log.channel_name ?? '-'}</td>
-                    <td className="px-4 py-3 text-muted-foreground text-xs">{log.api_key_name ?? '-'}</td>
+                    <td className="px-4 py-3 text-muted-foreground text-xs font-mono" title={log.upstream_key_hint ?? undefined}>{log.upstream_key_hint ?? '-'}</td>
                     <td className="px-4 py-3 text-center">
                       <span className="inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
                         {log.endpoint_type ? (ENDPOINT_LABELS[log.endpoint_type as EndpointType] ?? log.endpoint_type) : '-'}
@@ -330,7 +347,8 @@ export function Logs() {
                   <span>渠道: {detailLog.channel_name ?? '-'}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span>Key: {detailLog.api_key_name ?? '-'}</span>
+                  <span>Key: </span>
+                  <span className="font-mono" title={detailLog.upstream_key_hint ?? undefined}>{detailLog.upstream_key_hint ?? '-'}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <Zap className="h-3.5 w-3.5 text-amber-500" />
@@ -411,6 +429,9 @@ export function Logs() {
                       <div key={i} className="flex items-center gap-3 text-xs px-3 py-2 rounded-lg bg-muted/50">
                         <span className="text-muted-foreground w-4 text-right">#{i + 1}</span>
                         <span className="font-mono text-muted-foreground">{a.channel_id.slice(0, 8)}</span>
+                        {a.upstream_key_hint && (
+                          <span className="font-mono text-muted-foreground/70" title={a.upstream_key_hint}>{a.upstream_key_hint.length > 16 ? a.upstream_key_hint.slice(0, 16) + '…' : a.upstream_key_hint}</span>
+                        )}
                         <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-xs font-medium ${
                           a.status === 'success'
                             ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'

@@ -108,7 +108,7 @@ JWT 过期时间从 `config.toml` 的 `auth.token_expiry_hours` 读取，默认 
 | `config.rs` | TOML 配置加载 |
 | `db/` | 数据库连接、迁移 |
 | `proxy/` | 代理核心（缓存、模型索引、渠道选择、协议转换） |
-| `stats/` | 统计聚合（用量/成本）+ 模型定价信息 |
+| `stats/` | 统计聚合（用量/成本）+ 模型定价信息 + 请求日志记录与查询 |
 
 ### 命名规范
 
@@ -166,8 +166,8 @@ plutil -p ~/Library/LaunchAgents/homebrew.mxcl.galaxy-router.plist
 排查 cc / Claude Code 报错时，优先按这个顺序核对：
 
 1. 用报错里的时间戳换算服务日志时间。`output.log` 使用 UTC 时间（例如 `2026-05-29T07:52:24Z` 对应北京时间 `2026-05-29 15:52:24`）。
-2. 查询实际运行库的 `usage_logs`，确认 `requested_model`、`actual_model`、`channel_id`、`status_code`、`is_stream`、`error_message`、`response_content`。
-3. 用 `channel_id` 回查 `channels` 表，确认命中的渠道、端点和该渠道的 key 数量。
+2. 查询实际运行库的 `usage_logs`，确认 `requested_model`、`actual_model`、`channel_id`、`group_id`、`status_code`、`is_stream`、`error_message`、`response_content`、`upstream_key_hint`。
+3. 用 `channel_id` 回查 `channels` 表，确认命中的渠道、端点和该渠道的 key 数量。用 `upstream_key_hint` 定位具体使用了哪个上游 key。
 4. 如果 cc 看见了上游错误，但 Web 请求日志没有失败记录，重点检查是否为流式请求。
 
 当前实现里：非流式上游失败会同时写入 `error_message` 和 `response_content`；流式请求在建立 SSE 前失败会写入 `usage_logs`；上游以 HTTP 200 建立 SSE 后发送错误事件时，会把 `error_message` 写入日志并将 `status_code` 记为失败态（例如 502）。如果首个 SSE 事件就是错误，代理可以在尚未向客户端输出内容前触发 key / 渠道重试；如果已经向客户端输出过正常内容，后续流内错误只会记录并透传，不会无感切换 key。
@@ -204,3 +204,5 @@ Type 类型:
 - **API Key 轮询**: 使用 `AtomicU64` 计数器实现无锁 round-robin；一次请求选中渠道后，先按 round-robin 起点选择一个 key，遇到 401/402/429 或余额不足、无可用资源包、insufficient_quota 等 key / 账号资源错误时，会在同渠道内尝试下一个 key。只有该渠道所有 key 都失败，才排除整个 `channel_id` 转向其他渠道；流式请求一旦已向客户端输出正常内容，后续错误不会触发无感 key 切换。**端点和 API Key 支持单独禁用**：`ChannelInfo::enabled_api_keys()` 过滤禁用 Key 后再轮询，`find_endpoint()` 跳过禁用端点。
 - **上游错误脱敏**: `sanitize_upstream_error` 截断并提取关键信息，避免泄露上游内部细节
 - **统计聚合对齐整点**: aggregator 使用 wall-clock aligned sleep，而非固定间隔
+- **请求日志字段**: `upstream_key_hint` 记录上游 key 标识（优先 note，否则 `前8...后4` 截断）；`group_id` 仅通过分组路由时有值；`attempts` JSON 数组记录每次渠道尝试的 channel_id、key hint、状态、耗时和错误
+- **日志查询 API**: `GET /stats/logs/models` 返回不重复模型列表供前端下拉筛选；`GET /stats/logs` 支持 `model`（精确匹配）、`channel_id`、`status`、`api_key_id` 筛选
