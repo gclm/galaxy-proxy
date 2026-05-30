@@ -2172,9 +2172,15 @@ fn extract_usage_from_sse(text: &str, endpoint_type: &EndpointType) -> Option<Ss
             }
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
                 if event_type == "message_start" {
+                    // 标准格式: message.usage.input_tokens
                     if let Some(usage) = parsed.get("message").and_then(|m| m.get("usage")) {
                         return Some(SseUsageSource::AnthropicInput(usage.clone()));
                     }
+                    // 兼容: 某些供应商 usage 在根级
+                    if let Some(usage) = parsed.get("usage") {
+                        return Some(SseUsageSource::AnthropicInput(usage.clone()));
+                    }
+                    tracing::debug!("message_start 无 usage: {}", &data[..data.len().min(500)]);
                 } else if event_type == "message_delta"
                     && parsed.get("usage").is_some() {
                         return Some(SseUsageSource::AnthropicOutput(parsed));
