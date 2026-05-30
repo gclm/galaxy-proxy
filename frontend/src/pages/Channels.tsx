@@ -3,6 +3,7 @@ import { channelsApi, type ChannelListParams } from '@/api/channels'
 import type { Channel, CreateChannelRequest } from '@/api/types'
 import { ENDPOINT_LABELS } from '@/api/types'
 import { Button } from '@/components/ui/button'
+import { Pagination } from '@/components/Pagination'
 import { StatusBadge } from '@/components/StatusBadge'
 import { ConfirmDeleteDialog } from '@/components/ConfirmDeleteDialog'
 import { useDebouncedValue } from '@/lib/hooks'
@@ -22,8 +23,6 @@ import {
   FlaskConical,
   Search,
   RefreshCw,
-  ChevronLeft,
-  ChevronRight,
   ArrowUpDown,
 } from 'lucide-react'
 
@@ -39,7 +38,7 @@ export function Channels() {
   const [sortBy, setSortBy] = useState('created_at')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
   const [page, setPage] = useState(1)
-  const pageSize = 20
+  const [pageSize, setPageSize] = useState(20)
 
   // Dialog 状态
   const [formOpen, setFormOpen] = useState(false)
@@ -135,7 +134,6 @@ export function Channels() {
     setEditingChannel(null)
   }
 
-  const totalPages = Math.ceil(total / pageSize)
 
   return (
     <div className="space-y-4">
@@ -253,33 +251,7 @@ export function Channels() {
           </table>
         </div>
 
-        {/* 分页 */}
-        {total > pageSize && (
-          <div className="flex items-center justify-between px-4 py-3 border-t bg-muted/30">
-            <span className="text-sm text-muted-foreground">共 {total} 条</span>
-            <div className="flex items-center gap-1">
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-8 w-8"
-                disabled={page <= 1}
-                onClick={() => setPage(page - 1)}
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <span className="px-3 text-sm">{page} / {totalPages}</span>
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-8 w-8"
-                disabled={page >= totalPages}
-                onClick={() => setPage(page + 1)}
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        )}
+        <Pagination total={total} page={page} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={setPageSize} pageSizeOptions={[20, 50, 100]} />
       </div>
 
       {/* 创建/编辑 Dialog */}

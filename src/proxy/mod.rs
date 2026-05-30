@@ -1647,7 +1647,7 @@ async fn execute_proxy_stream(
                 let record = crate::stats::recorder::RequestRecord {
                     api_key_id: sc_api_key_id,
                     channel_id: Some(sc_channel_id),
-                    group_id: group_id,
+                    group_id,
                     requested_model: sc_model,
                     actual_model: Some(sc_target_model),
                     input_tokens,

@@ -5,6 +5,7 @@ import { channelsApi } from '@/api/channels'
 import { ENDPOINT_LABELS } from '@/api/types'
 import type { EndpointType, RequestLog, RequestLogDetail, ChannelAttempt, Channel } from '@/api/types'
 import { Button } from '@/components/ui/button'
+import { Pagination } from '@/components/Pagination'
 import {
   Dialog,
   DialogContent,
@@ -13,8 +14,6 @@ import {
 } from '@/components/ui/dialog'
 import {
   RefreshCw,
-  ChevronLeft,
-  ChevronRight,
   CheckCircle2,
   XCircle,
   Copy,
@@ -96,7 +95,7 @@ export function Logs() {
   const [loading, setLoading] = useState(true)
 
   const [page, setPage] = useState(1)
-  const pageSize = 20
+  const [pageSize, setPageSize] = useState(20)
 
   const [modelOptions, setModelOptions] = useState<string[]>([])
   const [channelOptions, setChannelOptions] = useState<Channel[]>([])
@@ -108,7 +107,7 @@ export function Logs() {
   const [logDetail, setLogDetail] = useState<RequestLogDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
 
-  useEffect(() => { setPage(1) }, [selectedModel, selectedChannel])
+  useEffect(() => { setPage(1) }, [selectedModel, selectedChannel, pageSize])
 
   useEffect(() => {
     statsApi.logModels().then(setModelOptions).catch(() => {})
@@ -132,7 +131,7 @@ export function Logs() {
     } finally {
       setLoading(false)
     }
-  }, [page, selectedModel, selectedChannel, status])
+  }, [page, pageSize, selectedModel, selectedChannel, status])
 
   useEffect(() => { fetchLogs() }, [fetchLogs])
 
@@ -154,8 +153,6 @@ export function Logs() {
     setDetailLog(null)
     setLogDetail(null)
   }
-
-  const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   return (
     <div className="space-y-4">
@@ -208,7 +205,6 @@ export function Logs() {
                 <th className="text-left px-4 py-3 font-medium whitespace-nowrap">时间</th>
                 <th className="text-left px-4 py-3 font-medium">模型</th>
                 <th className="text-left px-4 py-3 font-medium">渠道</th>
-                <th className="text-left px-4 py-3 font-medium">Key</th>
                 <th className="text-center px-4 py-3 font-medium">端点</th>
                 <th className="text-center px-4 py-3 font-medium">类型</th>
                 <th className="text-center px-4 py-3 font-medium">状态</th>
@@ -222,11 +218,11 @@ export function Logs() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={12} className="text-center py-12 text-muted-foreground">加载中...</td>
+                  <td colSpan={11} className="text-center py-12 text-muted-foreground">加载中...</td>
                 </tr>
               ) : logs.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="text-center py-12 text-muted-foreground">暂无请求日志</td>
+                  <td colSpan={11} className="text-center py-12 text-muted-foreground">暂无请求日志</td>
                 </tr>
               ) : (
                 logs.map((log) => (
@@ -245,7 +241,6 @@ export function Logs() {
                       </div>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground text-xs">{log.channel_name ?? '-'}</td>
-                    <td className="px-4 py-3 text-muted-foreground text-xs font-mono" title={log.upstream_key_hint ?? undefined}>{log.upstream_key_hint ?? '-'}</td>
                     <td className="px-4 py-3 text-center">
                       <span className="inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
                         {log.endpoint_type ? (ENDPOINT_LABELS[log.endpoint_type as EndpointType] ?? log.endpoint_type) : '-'}
@@ -294,19 +289,7 @@ export function Logs() {
           </table>
         </div>
 
-        {/* 分页 */}
-        <div className="flex items-center justify-between px-4 py-3 border-t bg-muted/30">
-          <span className="text-sm text-muted-foreground">共 {total} 条</span>
-          <div className="flex items-center gap-1">
-            <Button variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage(page - 1)}>
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <span className="px-3 text-sm">{page} / {totalPages}</span>
-            <Button variant="outline" size="icon" className="h-8 w-8" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
+        <Pagination total={total} page={page} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={setPageSize} pageSizeOptions={[20, 50, 100]} />
       </div>
 
       {/* 详情弹窗 */}
