@@ -1889,14 +1889,14 @@ async fn validate_model_access(
     .await
     .map_err(|e| ProxyError::DatabaseError(e.to_string()))?;
 
-    if let Some(models_str) = supported {
-        if !models_str.is_empty() {
-            let allowed = crate::api::handlers::admin::api_keys::parse_supported_models(&models_str);
-            if !allowed.iter().any(|m| m == model) {
-                return Err(ProxyError::NoAvailableChannel(
-                    format!("API Key 无权访问模型: {}", model)
-                ));
-            }
+    if let Some(models_str) = supported
+        && !models_str.is_empty()
+    {
+        let allowed = crate::api::handlers::admin::api_keys::parse_supported_models(&models_str);
+        if !allowed.iter().any(|m| m == model) {
+            return Err(ProxyError::NoAvailableChannel(
+                format!("API Key 无权访问模型: {}", model)
+            ));
         }
     }
 
