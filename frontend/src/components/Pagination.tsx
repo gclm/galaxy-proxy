@@ -25,14 +25,14 @@ export function Pagination({
   if (total <= 0) return null
 
   return (
-    <div className="flex items-center justify-between px-4 py-3 border-t bg-muted/30">
-      <div className="flex items-center gap-3">
-        <span className="text-sm text-muted-foreground">共 {total} 条</span>
+    <div className="flex items-center justify-between px-4 py-2.5 border-t">
+      <div className="flex items-center gap-3 text-sm text-muted-foreground">
+        <span>共 {total} 条</span>
         {onPageSizeChange && pageSizeOptions && (
           <select
             value={pageSize}
             onChange={(e) => onPageSizeChange(Number(e.target.value))}
-            className="input h-7 w-20 text-xs py-0"
+            className="h-7 rounded-md border border-input bg-background px-2 text-xs focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/30"
           >
             {pageSizeOptions.map(s => (
               <option key={s} value={s}>{s} 条/页</option>
@@ -40,13 +40,13 @@ export function Pagination({
           </select>
         )}
       </div>
-      <div className="flex items-center gap-1">
-        <Button variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
-          <ChevronLeft className="h-4 w-4" />
+      <div className="flex items-center gap-1.5">
+        <Button variant="outline" size="icon" className="h-7 w-7" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
+          <ChevronLeft className="h-3.5 w-3.5" />
         </Button>
-        <span className="px-2 text-sm tabular-nums">{page} / {totalPages}</span>
-        <Button variant="outline" size="icon" className="h-8 w-8" disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>
-          <ChevronRight className="h-4 w-4" />
+        <span className="px-2 text-xs tabular-nums text-muted-foreground">{page} / {totalPages}</span>
+        <Button variant="outline" size="icon" className="h-7 w-7" disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>
+          <ChevronRight className="h-3.5 w-3.5" />
         </Button>
         <input
           type="number"
@@ -62,7 +62,7 @@ export function Pagination({
             }
           }}
           placeholder="跳转"
-          className="input h-7 w-14 text-xs text-center py-0 ml-2"
+          className="h-7 w-14 rounded-md border border-input bg-background px-2 text-xs text-center focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/30 ml-1"
         />
       </div>
     </div>

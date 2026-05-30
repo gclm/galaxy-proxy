@@ -130,7 +130,9 @@ export function Groups() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">配置模型分组与负载均衡策略</p>
+        <div>
+          <p className="text-sm text-muted-foreground">配置模型分组与负载均衡策略</p>
+        </div>
         <Button onClick={openCreate} className="btn-primary">
           <Plus className="mr-2 h-4 w-4" />
           添加分组

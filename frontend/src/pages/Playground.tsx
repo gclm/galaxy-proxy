@@ -353,8 +353,7 @@ export function Playground() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">操练场</h1>
-        <p className="text-sm text-muted-foreground mt-1">
+        <p className="text-sm text-muted-foreground">
           用真实客户端请求测试代理管线：认证 → 路由 → 转换 → 上游
         </p>
       </div>
@@ -444,7 +443,7 @@ export function Playground() {
             ) : (
               <Button
                 onClick={handleSend}
-                className="w-full"
+                className="w-full btn-primary"
                 disabled={!selectedApiKey || !selectedModel}
               >
                 <Play className="h-4 w-4" />

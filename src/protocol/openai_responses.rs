@@ -214,8 +214,8 @@ impl Inbound for OpenAiResponsesInbound {
         let mut events = vec![];
 
         if let Some(choice) = event.first_choice() {
-            if let Some(reasoning) = &choice.delta.reasoning_content {
-                if !reasoning.is_empty() {
+            if let Some(reasoning) = &choice.delta.reasoning_content
+                && !reasoning.is_empty() {
                     events.push(format!(
                         "event: response.reasoning.delta\ndata: {}\n\n",
                         serde_json::json!({
@@ -225,7 +225,6 @@ impl Inbound for OpenAiResponsesInbound {
                         })
                     ));
                 }
-            }
 
             if let Some(content) = &choice.delta.content
                 && let Content::Text(text) = content
@@ -529,8 +528,8 @@ impl Outbound for OpenAiResponsesOutbound {
             }
             "response.completed" => {
                 let mut usage = None;
-                if let Some(resp) = parsed.get("response") {
-                    if let Some(u) = resp.get("usage") {
+                if let Some(resp) = parsed.get("response")
+                    && let Some(u) = resp.get("usage") {
                         usage = Some(Usage {
                             prompt_tokens: u["input_tokens"].as_u64().unwrap_or(0) as u32,
                             completion_tokens: u["output_tokens"].as_u64().unwrap_or(0) as u32,
@@ -540,7 +539,6 @@ impl Outbound for OpenAiResponsesOutbound {
                             completion_tokens_details: None,
                         });
                     }
-                }
                 Ok(Some(LlmStreamResponse {
                     id: parsed["response"]["id"].as_str().unwrap_or("").to_string(),
                     object: "chat.completion.chunk".to_string(),

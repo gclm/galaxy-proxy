@@ -156,7 +156,7 @@ export function Logs() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div>
         <p className="text-sm text-muted-foreground">查看每次 API 请求的详细记录</p>
       </div>
 

@@ -66,7 +66,7 @@ export function Setup() {
                 type="text"
                 value={siteTitle}
                 onChange={(e) => setSiteTitle(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="input"
                 placeholder="Galaxy Router"
               />
             </div>
@@ -80,7 +80,7 @@ export function Setup() {
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="input"
                 placeholder="至少 3 个字符"
                 required
               />
@@ -95,7 +95,7 @@ export function Setup() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="input"
                 placeholder="至少 8 个字符"
                 required
               />
@@ -110,19 +110,19 @@ export function Setup() {
                 type="password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="input"
                 placeholder="再次输入密码"
                 required
               />
             </div>
 
             {error && (
-              <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+              <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
                 {error}
               </div>
             )}
 
-            <Button type="submit" className="w-full" disabled={loading}>
+            <Button type="submit" className="w-full btn-primary" disabled={loading}>
               {loading ? '初始化中...' : '开始使用'}
             </Button>
           </form>

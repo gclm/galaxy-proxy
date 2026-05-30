@@ -3,6 +3,7 @@ import { authApi, settingsApi, backupApi } from '@/api'
 import type { SettingItem, InfraConfig } from '@/api/types'
 import type { ImportResult, ResetResult } from '@/api/backup'
 import { Button } from '@/components/ui/button'
+import { ToggleSwitch } from '@/components/ToggleSwitch'
 import { useAuthStore } from '@/stores/auth'
 import { User, Shield, TrendingUp, Sliders, Server, Database, Globe } from 'lucide-react'
 
@@ -267,7 +268,7 @@ function renderFieldControl(field: FieldDef, value: string, onUpdate: (key: stri
   const props = { value, onSave: (v: string) => onUpdate(field.key, v) }
   switch (field.type) {
     case 'switch':
-      return <SwitchControl value={value === 'true'} onSave={(v) => onUpdate(field.key, v ? 'true' : 'false')} />
+      return <ToggleSwitch enabled={value === 'true'} onClick={() => onUpdate(field.key, value === 'true' ? 'false' : 'true')} size="md" />
     case 'select':
       return field.options ? <SelectControl {...props} options={field.options} /> : null
     case 'text':
@@ -368,30 +369,6 @@ function SettingRow({ label, description, children }: { label: string; descripti
       </div>
       <div className="shrink-0">{children}</div>
     </div>
-  )
-}
-
-/* ── Switch 控件 ── */
-
-function SwitchControl({ value, onSave }: { value: boolean; onSave: (v: boolean) => Promise<void> }) {
-  const [pending, setPending] = useState(false)
-  const toggle = async () => {
-    setPending(true)
-    try { await onSave(!value) } finally { setPending(false) }
-  }
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={value}
-      disabled={pending}
-      onClick={toggle}
-      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary/30 ${
-        value ? 'bg-primary' : 'bg-muted'
-      }`}
-    >
-      <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${value ? 'translate-x-5' : 'translate-x-0'}`} />
-    </button>
   )
 }
 

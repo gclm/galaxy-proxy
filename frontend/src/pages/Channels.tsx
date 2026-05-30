@@ -138,7 +138,9 @@ export function Channels() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">管理上游服务渠道与 API Key</p>
+        <div>
+          <p className="text-sm text-muted-foreground">管理上游服务渠道与 API Key</p>
+        </div>
         <Button onClick={openCreate} className="btn-primary">
           <Plus className="mr-2 h-4 w-4" />
           添加渠道

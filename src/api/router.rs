@@ -60,7 +60,7 @@ pub async fn create_router(
     let api_key_state = ApiKeyState { pool: pool.clone() };
 
     let stats_state = StatsApiState {
-        stats: StatsState::new(pool.clone()),
+        stats: StatsState::new(pool.clone(), config.server.timezone_offset),
     };
 
     let model_info_state = ModelInfoState {

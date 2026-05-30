@@ -3,7 +3,7 @@ import { modelInfoApi } from '@/api'
 import type { ModelInfo } from '@/api/model-info'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Settings2, Search } from 'lucide-react'
+import { Search } from 'lucide-react'
 
 const CAPABILITY_LABELS: Record<string, string> = {
   supports_function_calling: '函数调用',
@@ -75,14 +75,11 @@ export function Models() {
 
   return (
     <div className="max-w-6xl space-y-4">
+      <p className="text-sm text-muted-foreground">
+        共 {models.length} 个模型（数据来自 models.dev，可手动覆盖）
+      </p>
       <section className="rounded-2xl border bg-card">
-        <div className="flex items-center justify-between gap-4 border-b px-5 py-3">
-          <div className="flex items-center gap-2">
-            <Settings2 className="h-4 w-4 text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">
-              共 {models.length} 个模型（数据来自 models.dev，可手动覆盖）
-            </p>
-          </div>
+        <div className="flex items-center justify-end gap-4 border-b px-5 py-3">
           <div className="flex items-center gap-2">
             <select
               value={provider}
@@ -249,7 +246,7 @@ function ModelEditDialog({ model, onSave, onClose }: {
 
         <DialogFooter>
           <Button size="sm" variant="ghost" onClick={onClose}>取消</Button>
-          <Button size="sm" onClick={handleSave} disabled={saving}>
+          <Button size="sm" onClick={handleSave} disabled={saving} className="btn-primary">
             {saving ? '保存中...' : '保存'}
           </Button>
         </DialogFooter>

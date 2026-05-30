@@ -1469,11 +1469,10 @@ async fn execute_proxy_stream(
                                 continue;
                             }
 
-                            if let Ok(text) = std::str::from_utf8(&event_bytes) {
-                                if let Some(source) = extract_usage_from_sse(text, &upstream_endpoint_clone) {
+                            if let Ok(text) = std::str::from_utf8(&event_bytes)
+                                && let Some(source) = extract_usage_from_sse(text, &upstream_endpoint_clone) {
                                     apply_sse_usage(source, &mut last_usage, &mut input_usage);
                                 }
-                            }
                             let mut is_error_event = false;
                             if stream_error.is_none()
                                 && let Ok(text) = std::str::from_utf8(&event_bytes)
@@ -1540,11 +1539,10 @@ async fn execute_proxy_stream(
             }
 
             if !buffer.is_empty() && !buffer.iter().all(|b| *b == b'\n' || *b == b'\r') {
-                if let Ok(text) = std::str::from_utf8(&buffer) {
-                    if let Some(source) = extract_usage_from_sse(text, &upstream_endpoint_clone) {
+                if let Ok(text) = std::str::from_utf8(&buffer)
+                    && let Some(source) = extract_usage_from_sse(text, &upstream_endpoint_clone) {
                         apply_sse_usage(source, &mut last_usage, &mut input_usage);
                     }
-                }
                 let mut is_error_event = false;
                 if stream_error.is_none()
                     && let Ok(text) = std::str::from_utf8(&buffer)
@@ -1604,8 +1602,8 @@ async fn execute_proxy_stream(
             }
 
             // 处理 buffer 中残余的最后一个事件
-            if !buffer.is_empty() && !buffer.iter().all(|b| *b == b'\n' || *b == b'\r') {
-                if let Ok(text) = std::str::from_utf8(&buffer) {
+            if !buffer.is_empty() && !buffer.iter().all(|b| *b == b'\n' || *b == b'\r')
+                && let Ok(text) = std::str::from_utf8(&buffer) {
                     if let Some(source) = extract_usage_from_sse(text, &upstream_endpoint_clone) {
                         apply_sse_usage(source, &mut last_usage, &mut input_usage);
                     }
@@ -1615,7 +1613,6 @@ async fn execute_proxy_stream(
                     }
                     collect_sse_content(text, &upstream_endpoint_clone, &mut collected_text, &mut collected_reasoning, &mut collected_tool_calls);
                 }
-            }
         }
 
         // 流结束后发送统计到 oneshot
@@ -2171,11 +2168,10 @@ fn extract_usage_from_sse(text: &str, endpoint_type: &EndpointType) -> Option<Ss
                     if let Some(usage) = parsed.get("message").and_then(|m| m.get("usage")) {
                         return Some(SseUsageSource::AnthropicInput(usage.clone()));
                     }
-                } else if event_type == "message_delta" {
-                    if parsed.get("usage").is_some() {
+                } else if event_type == "message_delta"
+                    && parsed.get("usage").is_some() {
                         return Some(SseUsageSource::AnthropicOutput(parsed));
                     }
-                }
             }
             None
         }
@@ -2330,21 +2326,18 @@ fn collect_sse_content(
                     data = stripped.trim_start();
                 }
             }
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
-                match event_type {
-                    "content_block_delta" => {
-                        if parsed["delta"]["type"] == "text_delta"
-                            && let Some(t) = parsed["delta"]["text"].as_str()
-                        {
-                            output.push_str(t);
-                        }
-                        if parsed["delta"]["type"] == "thinking_delta"
-                            && let Some(t) = parsed["delta"]["thinking"].as_str()
-                        {
-                            reasoning.push_str(t);
-                        }
-                    }
-                    _ => {}
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data)
+                && event_type == "content_block_delta"
+            {
+                if parsed["delta"]["type"] == "text_delta"
+                    && let Some(t) = parsed["delta"]["text"].as_str()
+                {
+                    output.push_str(t);
+                }
+                if parsed["delta"]["type"] == "thinking_delta"
+                    && let Some(t) = parsed["delta"]["thinking"].as_str()
+                {
+                    reasoning.push_str(t);
                 }
             }
         }

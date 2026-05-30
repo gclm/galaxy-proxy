@@ -38,6 +38,8 @@ const pageTitles: Record<string, string> = {
   '/api-keys': 'API Keys',
   '/stats': '统计分析',
   '/logs': '请求日志',
+  '/playground': '操练场',
+  '/models': '模型信息',
   '/settings': '设置',
 }
 

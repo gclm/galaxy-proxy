@@ -116,6 +116,6 @@ mod tests {
         let id1 = generate_id();
         let id2 = generate_id();
         assert_ne!(id1, id2);
-        assert!(id1.len() > 0);
+        assert!(!id1.is_empty());
     }
 }

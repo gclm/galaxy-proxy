@@ -1,5 +1,4 @@
 use std::io::Write;
-use std::path::PathBuf;
 
 #[tokio::test]
 async fn test_config_load() {

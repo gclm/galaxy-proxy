@@ -19,6 +19,12 @@ pub struct AppConfig {
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
+    #[serde(default = "default_timezone_offset")]
+    pub timezone_offset: i32,
+}
+
+fn default_timezone_offset() -> i32 {
+    8
 }
 
 #[derive(Debug, Deserialize, Clone)]

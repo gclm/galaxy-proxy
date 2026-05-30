@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/stores/auth'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 export function Login() {
   const [username, setUsername] = useState('')
@@ -28,54 +29,55 @@ export function Login() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background">
-      <div className="w-full max-w-md space-y-8 rounded-lg border p-8 shadow-lg">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold">Galaxy Router</h1>
-          <p className="mt-2 text-muted-foreground">登录管理面板</p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="username" className="block text-sm font-medium text-foreground">
-              用户名
-            </label>
-            <input
-              id="username"
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              placeholder="请输入用户名"
-              required
-            />
-          </div>
-
-          <div>
-            <label htmlFor="password" className="block text-sm font-medium text-foreground">
-              密码
-            </label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              placeholder="请输入密码"
-              required
-            />
-          </div>
-
-          {error && (
-            <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-              {error}
+      <Card className="w-full max-w-md">
+        <CardHeader className="text-center">
+          <CardTitle className="text-2xl">Galaxy Router</CardTitle>
+          <p className="text-sm text-muted-foreground">登录管理面板</p>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label htmlFor="username" className="block text-sm font-medium mb-1">
+                用户名
+              </label>
+              <input
+                id="username"
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="input"
+                placeholder="请输入用户名"
+                required
+              />
             </div>
-          )}
 
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? '登录中...' : '登录'}
-          </Button>
-        </form>
-      </div>
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium mb-1">
+                密码
+              </label>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="input"
+                placeholder="请输入密码"
+                required
+              />
+            </div>
+
+            {error && (
+              <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
+                {error}
+              </div>
+            )}
+
+            <Button type="submit" className="w-full btn-primary" disabled={loading}>
+              {loading ? '登录中...' : '登录'}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   )
 }

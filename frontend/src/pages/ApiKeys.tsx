@@ -134,7 +134,9 @@ export function ApiKeys() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">管理客户端访问密钥</p>
+        <div>
+          <p className="text-sm text-muted-foreground">管理客户端访问密钥</p>
+        </div>
         <Button onClick={() => setCreateOpen(true)} className="btn-primary">
           <Plus className="mr-2 h-4 w-4" />
           创建 API Key
