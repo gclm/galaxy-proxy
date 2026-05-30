@@ -385,29 +385,16 @@ impl Outbound for OpenAiResponsesOutbound {
             return Ok(None);
         }
 
-        // 解析 Responses 流式事件
-        let lines: Vec<&str> = text.lines().collect();
-        let mut event_type = "";
-        let mut data = "";
-
-        for line in &lines {
-            if let Some(stripped) = line.strip_prefix("event: ") {
-                event_type = stripped;
-            } else if let Some(stripped) = line.strip_prefix("data: ") {
-                data = stripped;
-            }
-        }
-
-        if data.is_empty() {
+        let sse = parse_sse_event(text);
+        if sse.data.is_empty() {
             return Ok(None);
         }
 
-        let parsed: serde_json::Value = serde_json::from_str(data).map_err(|e| {
+        let parsed: serde_json::Value = serde_json::from_str(&sse.data).map_err(|e| {
             OutboundError::ParseError(format!("解析 Responses 流式事件失败: {}", e))
         })?;
 
-        // 根据事件类型转换
-        match event_type {
+        match sse.event_type.as_str() {
             "response.output_text.delta" => {
                 let delta = parsed["delta"].as_str().unwrap_or("");
                 Ok(Some(LlmStreamResponse {

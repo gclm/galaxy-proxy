@@ -266,3 +266,23 @@ impl LlmStreamResponse {
             .is_some()
     }
 }
+
+/// 解析后的 SSE 事件（参考 AxonHub StreamEvent）
+pub struct SseEvent {
+    pub event_type: String,
+    pub data: String,
+}
+
+/// 从 SSE 文本中解析出 event_type 和 data
+pub fn parse_sse_event(text: &str) -> SseEvent {
+    let mut event_type = String::new();
+    let mut data = String::new();
+    for line in text.lines() {
+        if let Some(stripped) = line.strip_prefix("event: ") {
+            event_type = stripped.trim().to_string();
+        } else if let Some(stripped) = line.strip_prefix("data: ") {
+            data = stripped.trim_start().to_string();
+        }
+    }
+    SseEvent { event_type, data }
+}

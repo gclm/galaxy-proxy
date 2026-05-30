@@ -14,7 +14,6 @@ pub struct AnthropicOutbound;
 
 /// Anthropic 请求
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct AnthropicRequest {
     model: String,
     messages: Vec<AnthropicMessage>,
@@ -37,28 +36,6 @@ struct AnthropicRequest {
 struct AnthropicMessage {
     role: String,
     content: serde_json::Value,
-}
-
-/// Anthropic 响应
-#[derive(Debug, Serialize)]
-#[allow(dead_code)]
-struct AnthropicResponse {
-    id: String,
-    #[serde(rename = "type")]
-    response_type: String,
-    role: String,
-    content: Vec<serde_json::Value>,
-    model: String,
-    stop_reason: Option<String>,
-    usage: AnthropicUsage,
-}
-
-/// Anthropic 使用量
-#[derive(Debug, Serialize)]
-#[allow(dead_code)]
-struct AnthropicUsage {
-    input_tokens: u32,
-    output_tokens: u32,
 }
 
 #[async_trait]
@@ -507,28 +484,16 @@ impl Outbound for AnthropicOutbound {
             return Ok(None);
         }
 
-        // 解析 Anthropic 流式事件
-        let lines: Vec<&str> = text.lines().collect();
-        let mut event_type = "";
-        let mut data = "";
-
-        for line in &lines {
-            if let Some(stripped) = line.strip_prefix("event: ") {
-                event_type = stripped;
-            } else if let Some(stripped) = line.strip_prefix("data: ") {
-                data = stripped;
-            }
-        }
-
-        if data.is_empty() {
+        let sse = parse_sse_event(text);
+        if sse.data.is_empty() {
             return Ok(None);
         }
 
-        let parsed: serde_json::Value = serde_json::from_str(data).map_err(|e| {
+        let parsed: serde_json::Value = serde_json::from_str(&sse.data).map_err(|e| {
             OutboundError::ParseError(format!("解析 Anthropic 流式事件失败: {}", e))
         })?;
 
-        match event_type {
+        match sse.event_type.as_str() {
             "message_start" => {
                 let id = parsed["message"]["id"].as_str().unwrap_or("").to_string();
                 let model = parsed["message"]["model"].as_str().unwrap_or("").to_string();
