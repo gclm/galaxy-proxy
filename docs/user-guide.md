@@ -95,6 +95,24 @@ API Key 是分发给客户端使用的密钥。客户端在请求时通过 `Auth
 
 ![API Keys](images/api-keys.png)
 
+### 模型访问控制
+
+每个 API Key 可以配置「可用模型」，限制该 Key 只能访问指定的分组：
+
+- **留空**：允许访问所有模型（默认）
+- **选择分组**：只允许访问选中的分组对应的模型
+
+如果客户端请求的模型不在允许范围内，代理会返回错误：
+
+```json
+{
+  "error": {
+    "message": "API Key 无权访问模型: gpt-4o",
+    "type": "server_error"
+  }
+}
+```
+
 ### 客户端使用
 
 创建 API Key 后，客户端可以像使用 OpenAI API 一样调用 Galaxy Router：
@@ -147,7 +165,7 @@ response = client.chat.completions.create(
 | `/v1/messages` | POST | Anthropic Messages |
 | `/v1/embeddings` | POST | OpenAI Embeddings |
 | `/v1/images/generations` | POST | OpenAI Images |
-| `/v1/models` | GET | 模型列表 |
+| `/v1/models` | GET | 可用模型列表（仅返回分组名，按 API Key 过滤） |
 
 ## 统计分析
 

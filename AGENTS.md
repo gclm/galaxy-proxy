@@ -203,6 +203,7 @@ Type 类型:
 - **模型反向索引**: `ProxyCache.model_index` 维护 model→channel_id 映射，加速模型路由查找
 - **API Key 轮询**: 使用 `AtomicU64` 计数器实现无锁 round-robin；一次请求选中渠道后，先按 round-robin 起点选择一个 key，遇到 401/402/429 或余额不足、无可用资源包、insufficient_quota 等 key / 账号资源错误时，会在同渠道内尝试下一个 key。只有该渠道所有 key 都失败，才排除整个 `channel_id` 转向其他渠道；流式请求一旦已向客户端输出正常内容，后续错误不会触发无感 key 切换。**端点和 API Key 支持单独禁用**：`ChannelInfo::enabled_api_keys()` 过滤禁用 Key 后再轮询，`find_endpoint()` 跳过禁用端点。
 - **上游错误脱敏**: `sanitize_upstream_error` 截断并提取关键信息，避免泄露上游内部细节
+- **模型访问控制**: API Key 支持 `supported_models` 字段（逗号分隔分组名），`/v1/models` 按 Key 过滤返回，代理请求时 `validate_model_access()` 校验权限。解析逻辑统一在 `api_keys::parse_supported_models()`。`supported_models` 为空表示允许所有模型
 - **统计聚合对齐整点**: aggregator 使用 wall-clock aligned sleep，而非固定间隔
 - **请求日志字段**: `upstream_key_hint` 记录上游 key 标识（优先 note，否则 `前8...后4` 截断）；`group_id` 仅通过分组路由时有值；`attempts` JSON 数组记录每次渠道尝试的 channel_id、key hint、状态、耗时和错误
 - **日志查询 API**: `GET /stats/logs/models` 返回不重复模型列表供前端下拉筛选；`GET /stats/logs` 支持 `model`（精确匹配）、`channel_id`、`status`、`api_key_id` 筛选
