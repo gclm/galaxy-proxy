@@ -93,6 +93,24 @@ impl Inbound for OpenAiResponsesInbound {
             ));
         };
 
+        let tools = request.tools.map(|t| {
+            t.into_iter()
+                .filter_map(|tool| {
+                    if tool["type"] != "function" { return None; }
+                    let func = tool.get("function")?;
+                    let name = func["name"].as_str()?.to_string();
+                    Some(Tool {
+                        tool_type: "function".to_string(),
+                        function: FunctionDefinition {
+                            name,
+                            description: func["description"].as_str().map(String::from),
+                            parameters: func.get("parameters").cloned(),
+                        },
+                    })
+                })
+                .collect()
+        });
+
         Ok(LlmRequest {
             model: request.model,
             messages,
@@ -101,7 +119,7 @@ impl Inbound for OpenAiResponsesInbound {
             max_tokens: None,
             max_completion_tokens: request.max_output_tokens,
             stream: request.stream,
-            tools: None,
+            tools,
             tool_choice: None,
             stop: None,
             reasoning_effort: None,
@@ -116,6 +134,13 @@ impl Inbound for OpenAiResponsesInbound {
             .first()
             .map(|choice| {
                 let mut items = vec![];
+
+                if let Some(reasoning) = &choice.message.reasoning_content {
+                    items.push(serde_json::json!({
+                        "type": "reasoning",
+                        "summary": [{ "type": "summary_text", "text": reasoning }]
+                    }));
+                }
 
                 if let Some(content) = &choice.message.content {
                     match content {
@@ -257,13 +282,25 @@ impl Outbound for OpenAiResponsesOutbound {
             })
             .collect();
 
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "model": request.model,
             "input": input,
             "stream": request.stream,
             "temperature": request.temperature,
             "max_output_tokens": request.max_completion_tokens,
         });
+
+        if let Some(tools) = &request.tools {
+            let responses_tools: Vec<_> = tools.iter().map(|t| {
+                serde_json::json!({
+                    "type": "function",
+                    "name": t.function.name,
+                    "description": t.function.description,
+                    "parameters": t.function.parameters
+                })
+            }).collect();
+            body["tools"] = serde_json::json!(responses_tools);
+        }
 
         serde_json::to_vec(&body)
             .map_err(|e| OutboundError::TransformError(format!("序列化请求失败: {}", e)))

@@ -112,6 +112,7 @@ impl Inbound for AnthropicInbound {
                 _ => Role::User,
             };
 
+            let mut reasoning_content = None;
             let content = if let Some(s) = msg.content.as_str() {
                 Some(Content::Text(s.to_string()))
             } else if let Some(arr) = msg.content.as_array() {
@@ -136,6 +137,12 @@ impl Inbound for AnthropicInbound {
                             tool_call_id: item["tool_use_id"].as_str()?.to_string(),
                             content: item["content"].as_str().unwrap_or("").to_string(),
                         }),
+                        "thinking" => {
+                            if let Some(text) = item["thinking"].as_str() {
+                                reasoning_content = Some(text.to_string());
+                            }
+                            None
+                        }
                         _ => None,
                     })
                     .collect();
@@ -151,9 +158,27 @@ impl Inbound for AnthropicInbound {
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
-                reasoning_content: None,
+                reasoning_content,
             });
         }
+
+        let tools = request.tools.map(|t| {
+            t.into_iter()
+                .filter_map(|tool| {
+                    let name = tool["name"].as_str()?.to_string();
+                    Some(Tool {
+                        tool_type: "function".to_string(),
+                        function: FunctionDefinition {
+                            name,
+                            description: tool["description"].as_str().map(String::from),
+                            parameters: tool.get("input_schema").cloned(),
+                        },
+                    })
+                })
+                .collect()
+        });
+
+        let tool_choice = None;
 
         Ok(LlmRequest {
             model: request.model,
@@ -163,8 +188,8 @@ impl Inbound for AnthropicInbound {
             max_tokens: None,
             max_completion_tokens: request.max_tokens,
             stream: request.stream,
-            tools: None,
-            tool_choice: None,
+            tools,
+            tool_choice,
             stop: None,
             reasoning_effort: None,
             extra: std::collections::HashMap::new(),
@@ -177,6 +202,13 @@ impl Inbound for AnthropicInbound {
             .first()
             .map(|choice| {
                 let mut parts = vec![];
+
+                if let Some(reasoning) = &choice.message.reasoning_content {
+                    parts.push(serde_json::json!({
+                        "type": "thinking",
+                        "thinking": reasoning
+                    }));
+                }
 
                 if let Some(text_content) = &choice.message.content {
                     match text_content {
@@ -359,6 +391,16 @@ impl Outbound for AnthropicOutbound {
         if let Some(stream) = request.stream {
             body["stream"] = serde_json::json!(stream);
         }
+        if let Some(tools) = &request.tools {
+            let anthropic_tools: Vec<_> = tools.iter().map(|t| {
+                serde_json::json!({
+                    "name": t.function.name,
+                    "description": t.function.description,
+                    "input_schema": t.function.parameters
+                })
+            }).collect();
+            body["tools"] = serde_json::json!(anthropic_tools);
+        }
 
         serde_json::to_vec(&body)
             .map_err(|e| OutboundError::TransformError(format!("序列化请求失败: {}", e)))
@@ -376,6 +418,7 @@ impl Outbound for AnthropicOutbound {
         let model = response["model"].as_str().unwrap_or("").to_string();
 
         let mut message_content = vec![];
+        let mut reasoning_content = None;
         if let Some(content) = response["content"].as_array() {
             for item in content {
                 match item["type"].as_str() {
@@ -392,6 +435,11 @@ impl Outbound for AnthropicOutbound {
                             name: item["name"].as_str().unwrap_or("").to_string(),
                             input: item["input"].clone(),
                         });
+                    }
+                    Some("thinking") => {
+                        if reasoning_content.is_none() {
+                            reasoning_content = item["thinking"].as_str().map(String::from);
+                        }
                     }
                     _ => {}
                 }
@@ -439,7 +487,7 @@ impl Outbound for AnthropicOutbound {
                     name: None,
                     tool_calls: None,
                     tool_call_id: None,
-                    reasoning_content: None,
+                    reasoning_content,
                 },
                 finish_reason,
             }],
@@ -481,18 +529,19 @@ impl Outbound for AnthropicOutbound {
         })?;
 
         match event_type {
-            "content_block_delta" => {
-                let delta_text = parsed["delta"]["text"].as_str().unwrap_or("");
+            "message_start" => {
+                let id = parsed["message"]["id"].as_str().unwrap_or("").to_string();
+                let model = parsed["message"]["model"].as_str().unwrap_or("").to_string();
                 Ok(Some(LlmStreamResponse {
-                    id: String::new(),
+                    id,
                     object: "chat.completion.chunk".to_string(),
                     created: chrono::Utc::now().timestamp(),
-                    model: String::new(),
+                    model,
                     choices: vec![StreamChoice {
                         index: 0,
                         delta: Message {
                             role: Role::Assistant,
-                            content: Some(Content::Text(delta_text.to_string())),
+                            content: None,
                             name: None,
                             tool_calls: None,
                             tool_call_id: None,
@@ -504,26 +553,86 @@ impl Outbound for AnthropicOutbound {
                     system_fingerprint: None,
                 }))
             }
-            "message_stop" => Ok(Some(LlmStreamResponse {
-                id: String::new(),
-                object: "chat.completion.chunk".to_string(),
-                created: chrono::Utc::now().timestamp(),
-                model: String::new(),
-                choices: vec![StreamChoice {
-                    index: 0,
-                    delta: Message {
-                        role: Role::Assistant,
-                        content: None,
-                        name: None,
-                        tool_calls: None,
-                        tool_call_id: None,
-                        reasoning_content: None,
-                    },
-                    finish_reason: Some(FinishReason::Stop),
-                }],
-                usage: None,
-                system_fingerprint: None,
-            })),
+            "content_block_delta" => {
+                let delta_type = parsed["delta"]["type"].as_str().unwrap_or("");
+                match delta_type {
+                    "thinking_delta" => {
+                        let thinking = parsed["delta"]["thinking"].as_str().unwrap_or("");
+                        Ok(Some(LlmStreamResponse {
+                            id: String::new(),
+                            object: "chat.completion.chunk".to_string(),
+                            created: chrono::Utc::now().timestamp(),
+                            model: String::new(),
+                            choices: vec![StreamChoice {
+                                index: 0,
+                                delta: Message {
+                                    role: Role::Assistant,
+                                    content: None,
+                                    name: None,
+                                    tool_calls: None,
+                                    tool_call_id: None,
+                                    reasoning_content: Some(thinking.to_string()),
+                                },
+                                finish_reason: None,
+                            }],
+                            usage: None,
+                            system_fingerprint: None,
+                        }))
+                    }
+                    _ => {
+                        let delta_text = parsed["delta"]["text"].as_str().unwrap_or("");
+                        Ok(Some(LlmStreamResponse {
+                            id: String::new(),
+                            object: "chat.completion.chunk".to_string(),
+                            created: chrono::Utc::now().timestamp(),
+                            model: String::new(),
+                            choices: vec![StreamChoice {
+                                index: 0,
+                                delta: Message {
+                                    role: Role::Assistant,
+                                    content: Some(Content::Text(delta_text.to_string())),
+                                    name: None,
+                                    tool_calls: None,
+                                    tool_call_id: None,
+                                    reasoning_content: None,
+                                },
+                                finish_reason: None,
+                            }],
+                            usage: None,
+                            system_fingerprint: None,
+                        }))
+                    }
+                }
+            }
+            "message_delta" => {
+                let finish_reason = parsed["delta"]["stop_reason"].as_str().map(|sr| match sr {
+                    "end_turn" => FinishReason::Stop,
+                    "max_tokens" => FinishReason::Length,
+                    "tool_use" => FinishReason::ToolCalls,
+                    _ => FinishReason::Stop,
+                });
+                Ok(Some(LlmStreamResponse {
+                    id: String::new(),
+                    object: "chat.completion.chunk".to_string(),
+                    created: chrono::Utc::now().timestamp(),
+                    model: String::new(),
+                    choices: vec![StreamChoice {
+                        index: 0,
+                        delta: Message {
+                            role: Role::Assistant,
+                            content: None,
+                            name: None,
+                            tool_calls: None,
+                            tool_call_id: None,
+                            reasoning_content: None,
+                        },
+                        finish_reason,
+                    }],
+                    usage: None,
+                    system_fingerprint: None,
+                }))
+            }
+            "message_stop" => Ok(None),
             _ => Ok(None),
         }
     }

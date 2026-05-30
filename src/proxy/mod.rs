@@ -887,7 +887,13 @@ async fn prepare_proxy_request(
             .transform_request(&llm_request)
             .map_err(|e| ProxyError::TransformError(e.to_string()))?
     } else {
-        serde_json::to_vec(body).map_err(|e| ProxyError::TransformError(e.to_string()))?
+        let mut body = body.clone();
+        if body["stream"].as_bool().unwrap_or(false)
+            && matches!(upstream_endpoint, EndpointType::OpenAiChat | EndpointType::OpenAiResponse)
+        {
+            body["stream_options"] = serde_json::json!({"include_usage": true});
+        }
+        serde_json::to_vec(&body).map_err(|e| ProxyError::TransformError(e.to_string()))?
     };
 
     let mut reqwest_headers = reqwest::header::HeaderMap::new();
@@ -1437,6 +1443,7 @@ async fn execute_proxy_stream(
     let response_stream = async_stream::stream! {
         let mut stream = std::pin::pin!(upstream_stream);
         let mut last_usage: Option<serde_json::Value> = None;
+        let mut input_usage: Option<serde_json::Value> = None;
         let mut buffer = Vec::new();
         let mut collected_text = String::new();
         let mut stream_error: Option<String> = None;
@@ -1460,10 +1467,11 @@ async fn execute_proxy_stream(
                                 continue;
                             }
 
-                            if let Ok(text) = std::str::from_utf8(&event_bytes)
-                                && let Some(usage) = extract_usage_from_sse(text, &upstream_endpoint_clone) {
-                                    last_usage = Some(usage);
+                            if let Ok(text) = std::str::from_utf8(&event_bytes) {
+                                if let Some(source) = extract_usage_from_sse(text, &upstream_endpoint_clone) {
+                                    apply_sse_usage(source, &mut last_usage, &mut input_usage);
                                 }
+                            }
                             let mut is_error_event = false;
                             if stream_error.is_none()
                                 && let Ok(text) = std::str::from_utf8(&event_bytes)
@@ -1517,10 +1525,11 @@ async fn execute_proxy_stream(
             }
 
             if !buffer.is_empty() && !buffer.iter().all(|b| *b == b'\n' || *b == b'\r') {
-                if let Ok(text) = std::str::from_utf8(&buffer)
-                    && let Some(usage) = extract_usage_from_sse(text, &upstream_endpoint_clone) {
-                        last_usage = Some(usage);
+                if let Ok(text) = std::str::from_utf8(&buffer) {
+                    if let Some(source) = extract_usage_from_sse(text, &upstream_endpoint_clone) {
+                        apply_sse_usage(source, &mut last_usage, &mut input_usage);
                     }
+                }
                 let mut is_error_event = false;
                 if stream_error.is_none()
                     && let Ok(text) = std::str::from_utf8(&buffer)
@@ -1544,16 +1553,28 @@ async fn execute_proxy_stream(
             while let Some(chunk) = stream.next().await {
                 match chunk {
                     Ok(bytes) => {
-                        if let Ok(text) = std::str::from_utf8(&bytes) {
-                            if let Some(usage) = extract_usage_from_sse(text, &upstream_endpoint_clone) {
-                                last_usage = Some(usage);
+                        buffer.extend_from_slice(&bytes);
+
+                        while let Some(event_end) = find_sse_boundary(&buffer) {
+                            let event_bytes = buffer[..event_end].to_vec();
+                            buffer = buffer[event_end..].to_vec();
+
+                            if event_bytes.iter().all(|b| *b == b'\n' || *b == b'\r') {
+                                continue;
                             }
-                            if stream_error.is_none()
-                                && let Some(error) = extract_error_from_sse(text, &upstream_endpoint_clone) {
+
+                            if let Ok(text) = std::str::from_utf8(&event_bytes) {
+                                if let Some(source) = extract_usage_from_sse(text, &upstream_endpoint_clone) {
+                                    apply_sse_usage(source, &mut last_usage, &mut input_usage);
+                                }
+                                if stream_error.is_none()
+                                    && let Some(error) = extract_error_from_sse(text, &upstream_endpoint_clone) {
                                     stream_error = Some(error);
                                 }
-                            collect_sse_text(text, &upstream_endpoint_clone, &mut collected_text);
+                                collect_sse_text(text, &upstream_endpoint_clone, &mut collected_text);
+                            }
                         }
+
                         if !first_token_seen {
                             ttft_ms = Some(start_time.elapsed().as_millis() as i32);
                             first_token_seen = true;
@@ -1566,14 +1587,46 @@ async fn execute_proxy_stream(
                     }
                 }
             }
+
+            // 处理 buffer 中残余的最后一个事件
+            if !buffer.is_empty() && !buffer.iter().all(|b| *b == b'\n' || *b == b'\r') {
+                if let Ok(text) = std::str::from_utf8(&buffer) {
+                    if let Some(source) = extract_usage_from_sse(text, &upstream_endpoint_clone) {
+                        apply_sse_usage(source, &mut last_usage, &mut input_usage);
+                    }
+                    if stream_error.is_none()
+                        && let Some(error) = extract_error_from_sse(text, &upstream_endpoint_clone) {
+                        stream_error = Some(error);
+                    }
+                    collect_sse_text(text, &upstream_endpoint_clone, &mut collected_text);
+                }
+            }
         }
 
         // 流结束后发送统计到 oneshot
         let latency_ms = start_time.elapsed().as_millis() as i64;
-        let (input_tokens, output_tokens, cache_read, cache_creation) =
-            last_usage
-                .map(|u| extract_usage(&u, &upstream_endpoint_clone))
-                .unwrap_or((0, 0, 0, 0));
+        let (input_tokens, output_tokens, cache_read, cache_creation) = match &upstream_endpoint_clone {
+            EndpointType::Anthropic => {
+                let input = input_usage.as_ref()
+                    .and_then(|u| u["input_tokens"].as_i64())
+                    .unwrap_or(0) as i32;
+                let output = last_usage.as_ref()
+                    .and_then(|u| u["usage"]["output_tokens"].as_i64())
+                    .unwrap_or(0) as i32;
+                let cache_read = input_usage.as_ref()
+                    .and_then(|u| u["cache_read_input_tokens"].as_i64())
+                    .unwrap_or(0) as i32;
+                let cache_creation = input_usage.as_ref()
+                    .and_then(|u| u["cache_creation_input_tokens"].as_i64())
+                    .unwrap_or(0) as i32;
+                (input, output, cache_read, cache_creation)
+            }
+            _ => {
+                last_usage
+                    .map(|u| extract_usage(&u, &upstream_endpoint_clone))
+                    .unwrap_or((0, 0, 0, 0))
+            }
+        };
 
         let cost = if input_tokens > 0 || output_tokens > 0 {
             Some(state_clone.model_registry.calculate_cost(
@@ -1596,11 +1649,20 @@ async fn execute_proxy_stream(
             )
         } else {
             state_clone.lb_state.record_success(&channel_id_clone, latency_ms as f64).await;
-            (
-                200i32,
-                None,
-                if collected_text.is_empty() { None } else { Some(collected_text) },
-            )
+            let resp = if collected_text.is_empty() && input_tokens == 0 && output_tokens == 0 {
+                None
+            } else {
+                Some(serde_json::json!({
+                    "content": collected_text,
+                    "usage": {
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "cache_read_tokens": cache_read,
+                        "cache_creation_tokens": cache_creation,
+                    }
+                }).to_string())
+            };
+            (200i32, None, resp)
         };
 
         let _ = stats_tx.send((
@@ -2031,23 +2093,46 @@ fn find_sse_boundary(buffer: &[u8]) -> Option<usize> {
     None
 }
 
-/// 从 SSE 事件中提取 usage 数据
-fn extract_usage_from_sse(text: &str, endpoint_type: &EndpointType) -> Option<serde_json::Value> {
+/// 将 SSE usage 提取结果分发到对应变量
+#[inline]
+fn apply_sse_usage(
+    source: SseUsageSource,
+    last_usage: &mut Option<serde_json::Value>,
+    input_usage: &mut Option<serde_json::Value>,
+) {
+    match source {
+        SseUsageSource::OpenAi(v) => *last_usage = Some(v),
+        SseUsageSource::AnthropicInput(v) => *input_usage = Some(v),
+        SseUsageSource::AnthropicOutput(v) => *last_usage = Some(v),
+    }
+}
+
+/// SSE 中提取到的 usage 来源
+#[derive(Debug, Clone)]
+enum SseUsageSource {
+    /// OpenAI: data 行直接包含 usage
+    OpenAi(serde_json::Value),
+    /// Anthropic message_start: usage 在 message.usage 中（含 input_tokens）
+    AnthropicInput(serde_json::Value),
+    /// Anthropic message_delta: usage 在根级（含 output_tokens）
+    AnthropicOutput(serde_json::Value),
+}
+
+/// 从 SSE 事件中提取 usage 数据（需要完整事件，由 find_sse_boundary 分割）
+fn extract_usage_from_sse(text: &str, endpoint_type: &EndpointType) -> Option<SseUsageSource> {
     match endpoint_type {
         EndpointType::OpenAiChat | EndpointType::OpenAiResponse => {
-            // OpenAI 格式: data: {"usage": {...}}
             for line in text.lines() {
                 if let Some(data) = line.strip_prefix("data: ")
                     && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data)
                     && parsed.get("usage").is_some()
                 {
-                    return Some(parsed);
+                    return Some(SseUsageSource::OpenAi(parsed));
                 }
             }
             None
         }
         EndpointType::Anthropic => {
-            // Anthropic 格式: event: message_delta\ndata: {"usage": {...}}
             let mut event_type = "";
             let mut data = "";
             for line in text.lines() {
@@ -2057,11 +2142,16 @@ fn extract_usage_from_sse(text: &str, endpoint_type: &EndpointType) -> Option<se
                     data = stripped;
                 }
             }
-            if event_type == "message_delta"
-                && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data)
-                && parsed.get("usage").is_some()
-            {
-                return Some(parsed);
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
+                if event_type == "message_start" {
+                    if let Some(usage) = parsed.get("message").and_then(|m| m.get("usage")) {
+                        return Some(SseUsageSource::AnthropicInput(usage.clone()));
+                    }
+                } else if event_type == "message_delta" {
+                    if parsed.get("usage").is_some() {
+                        return Some(SseUsageSource::AnthropicOutput(parsed));
+                    }
+                }
             }
             None
         }
