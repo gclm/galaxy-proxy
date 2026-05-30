@@ -874,7 +874,11 @@ async fn prepare_proxy_request(
     let upstream_endpoint = selection.endpoint.endpoint_type.clone();
     let needs_conversion = client_endpoint != &upstream_endpoint;
 
-    let request_body = if needs_conversion {
+    let is_stream = body["stream"].as_bool().unwrap_or(false);
+    let needs_usage_injection = is_stream
+        && matches!(upstream_endpoint, EndpointType::OpenAiChat | EndpointType::OpenAiResponse);
+
+    let mut request_body = if needs_conversion {
         let inbound = get_inbound(client_endpoint);
         let outbound = get_outbound(&upstream_endpoint);
         let body_bytes =
@@ -887,14 +891,17 @@ async fn prepare_proxy_request(
             .transform_request(&llm_request)
             .map_err(|e| ProxyError::TransformError(e.to_string()))?
     } else {
-        let mut body = body.clone();
-        if body["stream"].as_bool().unwrap_or(false)
-            && matches!(upstream_endpoint, EndpointType::OpenAiChat | EndpointType::OpenAiResponse)
-        {
-            body["stream_options"] = serde_json::json!({"include_usage": true});
-        }
+        let body = body.clone();
         serde_json::to_vec(&body).map_err(|e| ProxyError::TransformError(e.to_string()))?
     };
+
+    // 协议转换和非转换路径统一注入 stream_options
+    if needs_usage_injection
+        && let Ok(mut req_val) = serde_json::from_slice::<serde_json::Value>(&request_body)
+    {
+        req_val["stream_options"] = serde_json::json!({"include_usage": true});
+        request_body = serde_json::to_vec(&req_val).unwrap_or(request_body);
+    }
 
     let mut reqwest_headers = reqwest::header::HeaderMap::new();
     reqwest_headers.insert("Content-Type", "application/json".parse().unwrap());
