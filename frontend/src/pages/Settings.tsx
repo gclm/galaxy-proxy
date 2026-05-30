@@ -84,7 +84,7 @@ export function Settings() {
     const weightsStr = settingMap['scheduler.score_weights']?.value
     let obj: Record<string, number> = { priority: 1.0, load: 1.0, queue: 0.7, error_rate: 0.8, ttft: 0.5 }
     if (weightsStr) {
-      try { obj = JSON.parse(weightsStr) } catch {}
+      try { obj = JSON.parse(weightsStr) } catch { /* ignore */ }
     }
     obj[weightName] = val
     await settingsApi.update('scheduler.score_weights', JSON.stringify(obj))
@@ -401,8 +401,6 @@ function InlineTextEdit({ value, onSave }: { value: string; onSave: (v: string) 
   const [draft, setDraft] = useState(value)
   const [pending, setPending] = useState(false)
 
-  useEffect(() => { if (!editing) setDraft(value) }, [value, editing])
-
   const save = async () => {
     setPending(true)
     try {
@@ -455,8 +453,6 @@ function InlineNumberEdit({ value, onSave, min, max, step, unit }: {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value)
   const [pending, setPending] = useState(false)
-
-  useEffect(() => { if (!editing) setDraft(value) }, [value, editing])
 
   const save = async () => {
     const num = parseFloat(draft)

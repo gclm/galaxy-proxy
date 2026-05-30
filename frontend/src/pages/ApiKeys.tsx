@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { apiKeysApi, groupsApi } from '@/api'
 import type { ApiKey, Group } from '@/api/types'
 import { Button } from '@/components/ui/button'
@@ -39,30 +39,29 @@ export function ApiKeys() {
   // 分组列表（用于模型选择）
   const [availableGroups, setAvailableGroups] = useState<Group[]>([])
   const [selectedModels, setSelectedModels] = useState<string[]>([])
+  const fetchRef = useRef<() => void>(() => {})
 
-  const fetchApiKeys = useCallback(async () => {
-    setLoading(true)
-    try {
-      const data = await apiKeysApi.list()
-      setApiKeys(data)
-    } catch (error) {
-      console.error('Failed to fetch API keys:', error)
-    } finally {
-      setLoading(false)
+  useEffect(() => {
+    const controller = new AbortController()
+    const run = async () => {
+      setLoading(true)
+      try {
+        const data = await apiKeysApi.list()
+        if (!controller.signal.aborted) setApiKeys(data)
+      } catch (error) {
+        if (!controller.signal.aborted) console.error('Failed to fetch API keys:', error)
+      } finally {
+        if (!controller.signal.aborted) setLoading(false)
+      }
     }
+    run()
+    fetchRef.current = run
+    return () => { controller.abort() }
   }, [])
 
-  const fetchGroups = useCallback(async () => {
-    try {
-      const res = await groupsApi.list({ page_size: 1000 })
-      setAvailableGroups(res.items)
-    } catch (error) {
-      console.error('Failed to fetch groups:', error)
-    }
+  useEffect(() => {
+    groupsApi.list({ page_size: 1000 }).then(res => setAvailableGroups(res.items)).catch(console.error)
   }, [])
-
-  useEffect(() => { fetchApiKeys() }, [fetchApiKeys])
-  useEffect(() => { fetchGroups() }, [fetchGroups])
 
   const handleCreate = async () => {
     if (!newKeyName.trim()) return
@@ -85,12 +84,12 @@ export function ApiKeys() {
     if (!deleteId) return
     await apiKeysApi.delete(deleteId)
     setDeleteId(null)
-    fetchApiKeys()
+    fetchRef.current()
   }
 
   const handleToggleEnabled = async (key: ApiKey) => {
     await apiKeysApi.update(key.id, { enabled: !key.enabled })
-    fetchApiKeys()
+    fetchRef.current()
   }
 
   const copyToClipboard = async (key: string) => {
@@ -155,7 +154,7 @@ export function ApiKeys() {
             className="input pl-9"
           />
         </div>
-        <Button variant="outline" size="icon" onClick={fetchApiKeys} title="刷新">
+        <Button variant="outline" size="icon" onClick={() => fetchRef.current()} title="刷新">
           <RefreshCw className="h-4 w-4" />
         </Button>
       </div>

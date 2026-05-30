@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { channelsApi, type ChannelListParams } from '@/api/channels'
 import type { Channel, CreateChannelRequest } from '@/api/types'
 import { ENDPOINT_LABELS } from '@/api/types'
@@ -45,6 +45,8 @@ export function Channels() {
   const [editingChannel, setEditingChannel] = useState<Channel | null>(null)
   const [testChannel, setTestChannel] = useState<Channel | null>(null)
 
+  const fetchRef = useRef<() => void>(() => {})
+
   // 删除确认
   const [deleteId, setDeleteId] = useState<string | null>(null)
 
@@ -57,36 +59,39 @@ export function Channels() {
     }
   }, [search])
 
-  const fetchChannels = useCallback(async () => {
-    setLoading(true)
-    try {
-      const params: ChannelListParams = {
-        search: search || undefined,
-        status: status || undefined,
-        sort_by: sortBy,
-        sort_order: sortOrder,
-        page,
-        page_size: pageSize,
-      }
-      const data = await channelsApi.list(params)
-      setChannels(data.items)
-      setTotal(data.total)
-    } catch (error) {
-      console.error('Failed to fetch channels:', error)
-    } finally {
-      setLoading(false)
-    }
-  }, [search, status, sortBy, sortOrder, page])
-
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchChannels()
-  }, [fetchChannels])
+    const controller = new AbortController()
+    const run = async () => {
+      setLoading(true)
+      try {
+        const params: ChannelListParams = {
+          search: search || undefined,
+          status: status || undefined,
+          sort_by: sortBy,
+          sort_order: sortOrder,
+          page,
+          page_size: pageSize,
+        }
+        const data = await channelsApi.list(params)
+        if (!controller.signal.aborted) {
+          setChannels(data.items)
+          setTotal(data.total)
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) console.error('Failed to fetch channels:', error)
+      } finally {
+        if (!controller.signal.aborted) setLoading(false)
+      }
+    }
+    run()
+    fetchRef.current = run
+    return () => { controller.abort() }
+  }, [search, status, sortBy, sortOrder, page, pageSize])
 
   const handleCreate = async (data: CreateChannelRequest) => {
     await channelsApi.create(data)
     setFormOpen(false)
-    fetchChannels()
+    fetchRef.current()
   }
 
   const handleUpdate = async (data: CreateChannelRequest) => {
@@ -94,19 +99,19 @@ export function Channels() {
     await channelsApi.update(editingChannel.id, data)
     setEditingChannel(null)
     setFormOpen(false)
-    fetchChannels()
+    fetchRef.current()
   }
 
   const handleToggleEnabled = async (channel: Channel) => {
     await channelsApi.update(channel.id, { enabled: !channel.enabled })
-    fetchChannels()
+    fetchRef.current()
   }
 
   const handleDelete = async () => {
     if (!deleteId) return
     await channelsApi.delete(deleteId)
     setDeleteId(null)
-    fetchChannels()
+    fetchRef.current()
   }
 
   const handleSort = (field: string) => {
@@ -168,7 +173,7 @@ export function Channels() {
           <option value="enabled">启用</option>
           <option value="disabled">禁用</option>
         </select>
-        <Button variant="outline" size="icon" onClick={fetchChannels} title="刷新">
+        <Button variant="outline" size="icon" onClick={() => fetchRef.current()} title="刷新">
           <RefreshCw className="h-4 w-4" />
         </Button>
       </div>

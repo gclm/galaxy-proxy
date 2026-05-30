@@ -125,7 +125,7 @@ export function Playground() {
 
   const selectedApiKey = apiKeys.find((k) => k.id === selectedApiKeyId)
 
-  // 获取 API Key 列表
+  // 获取 API Key 列表（仅初始化）
   useEffect(() => {
     apiKeysApi.list().then((keys) => {
       setApiKeys(keys.filter((k) => k.enabled))
@@ -139,24 +139,26 @@ export function Playground() {
   // 切换 API Key 时刷新模型列表
   useEffect(() => {
     if (!selectedApiKey) return
-    fetchModels(selectedApiKey.api_key)
-  }, [selectedApiKeyId])
-
-  const fetchModels = async (apiKey: string) => {
-    try {
-      const res = await fetch('/v1/models', {
-        headers: { Authorization: `Bearer ${apiKey}` },
-      })
-      const data = await res.json()
-      if (data.data) {
-        const names = data.data.map((m: { id: string }) => m.id).sort()
-        setModels(names)
-        setSelectedModel((prev) => (prev && names.includes(prev) ? prev : names[0]))
+    const controller = new AbortController()
+    const run = async () => {
+      try {
+        const res = await fetch('/v1/models', {
+          headers: { Authorization: `Bearer ${selectedApiKey.api_key}` },
+          signal: controller.signal,
+        })
+        const data = await res.json()
+        if (data.data && !controller.signal.aborted) {
+          const names = data.data.map((m: { id: string }) => m.id).sort()
+          setModels(names)
+          setSelectedModel((prev) => (prev && names.includes(prev) ? prev : names[0]))
+        }
+      } catch {
+        if (!controller.signal.aborted) setModels([])
       }
-    } catch {
-      setModels([])
     }
-  }
+    run()
+    return () => { controller.abort() }
+  }, [selectedApiKeyId])
 
   // 流式 SSE 解析
   const parseStreamResponse = async (

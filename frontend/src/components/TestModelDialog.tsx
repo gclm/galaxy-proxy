@@ -117,8 +117,8 @@ export function TestModelDialog({ channel, open, onOpenChange }: TestModelDialog
         ])
         setStatus('error')
       }
-    } catch (error: any) {
-      const msg = error?.message || '未知错误'
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '未知错误'
       setResult({ success: false, message: msg, latency_ms: 0, input_prompt: '', output_content: null })
       addLogs([
         { text: `✗ 请求失败: ${msg}`, type: 'error' },

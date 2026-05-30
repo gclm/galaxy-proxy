@@ -87,29 +87,22 @@ export function Dashboard() {
   }, [])
 
   useEffect(() => {
-    const fetchCharts = async () => {
-      if (loading) {
-        const [dailyData, modelsData, channelsData] = await Promise.all([
-          statsApi.daily(chartParams).catch<DailyStats[]>(() => []),
-          statsApi.models(chartParams).catch<ModelStats[]>(() => []),
-          statsApi.channels(chartParams).catch<ChannelStats[]>(() => []),
-        ])
-        setDaily(dailyData)
-        setModels(modelsData)
-        setChannels(channelsData)
-        setLoading(false)
-      } else {
-        const [d, m, c] = await Promise.all([
-          statsApi.daily(chartParams).catch<DailyStats[]>(() => []),
-          statsApi.models(chartParams).catch<ModelStats[]>(() => []),
-          statsApi.channels(chartParams).catch<ChannelStats[]>(() => []),
-        ])
+    const controller = new AbortController()
+    const run = async () => {
+      const [d, m, c] = await Promise.all([
+        statsApi.daily(chartParams).catch<DailyStats[]>(() => []),
+        statsApi.models(chartParams).catch<ModelStats[]>(() => []),
+        statsApi.channels(chartParams).catch<ChannelStats[]>(() => []),
+      ])
+      if (!controller.signal.aborted) {
         setDaily(d)
         setModels(m)
         setChannels(c)
+        setLoading(false)
       }
     }
-    fetchCharts()
+    run()
+    return () => { controller.abort() }
   }, [chartParams])
 
   const handleRangeTab = (days: number) => {

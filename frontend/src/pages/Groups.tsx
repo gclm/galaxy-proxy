@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { groupsApi, type GroupListParams } from '@/api/groups'
 import { channelsApi } from '@/api/channels'
 import type { Channel, Group, CreateGroupRequest } from '@/api/types'
@@ -42,33 +42,37 @@ export function Groups() {
   const [deleteId, setDeleteId] = useState<string | null>(null)
 
   const [channels, setChannels] = useState<Channel[]>([])
-
-  const fetchGroups = useCallback(async () => {
-    setLoading(true)
-    try {
-      const params: GroupListParams = {
-        search: search || undefined,
-        status: status || undefined,
-        sort_by: sortBy,
-        sort_order: sortOrder,
-        page,
-        page_size: pageSize,
-      }
-      const data = await groupsApi.list(params)
-      setGroups(data.items)
-      setTotal(data.total)
-    } catch (error) {
-      console.error('Failed to fetch groups:', error)
-    } finally {
-      setLoading(false)
-    }
-  }, [search, status, sortBy, sortOrder, page])
-
+  const fetchRef = useRef<() => void>(() => {})
   useEffect(() => {
-    fetchGroups()
-  }, [fetchGroups])
+    const controller = new AbortController()
+    const run = async () => {
+      setLoading(true)
+      try {
+        const params: GroupListParams = {
+          search: search || undefined,
+          status: status || undefined,
+          sort_by: sortBy,
+          sort_order: sortOrder,
+          page,
+          page_size: pageSize,
+        }
+        const data = await groupsApi.list(params)
+        if (!controller.signal.aborted) {
+          setGroups(data.items)
+          setTotal(data.total)
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) console.error('Failed to fetch groups:', error)
+      } finally {
+        if (!controller.signal.aborted) setLoading(false)
+      }
+    }
+    run()
+    fetchRef.current = run
+    return () => { controller.abort() }
+  }, [search, status, sortBy, sortOrder, page, pageSize])
 
-  // 搜索变化时重置页码
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setPage(1) }, [search])
 
   useEffect(() => {
@@ -78,7 +82,7 @@ export function Groups() {
   const handleCreate = async (data: CreateGroupRequest) => {
     await groupsApi.create(data)
     setFormOpen(false)
-    fetchGroups()
+    fetchRef.current()
   }
 
   const handleUpdate = async (data: CreateGroupRequest) => {
@@ -86,19 +90,19 @@ export function Groups() {
     await groupsApi.update(editingGroup.id, data)
     setEditingGroup(null)
     setFormOpen(false)
-    fetchGroups()
+    fetchRef.current()
   }
 
   const handleToggleEnabled = async (group: Group) => {
     await groupsApi.update(group.id, { enabled: !group.enabled })
-    fetchGroups()
+    fetchRef.current()
   }
 
   const handleDelete = async () => {
     if (!deleteId) return
     await groupsApi.delete(deleteId)
     setDeleteId(null)
-    fetchGroups()
+    fetchRef.current()
   }
 
   const handleSort = (field: string) => {
@@ -160,7 +164,7 @@ export function Groups() {
           <option value="enabled">启用</option>
           <option value="disabled">禁用</option>
         </select>
-        <Button variant="outline" size="icon" onClick={fetchGroups} title="刷新">
+        <Button variant="outline" size="icon" onClick={() => fetchRef.current()} title="刷新">
           <RefreshCw className="h-4 w-4" />
         </Button>
       </div>
