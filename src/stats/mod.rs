@@ -1,4 +1,3 @@
-pub mod aggregator;
 pub mod model;
 pub mod pricing_refresher;
 pub mod recorder;
@@ -12,27 +11,11 @@ pub struct StatsState {
     pub pool: SqlitePool,
 }
 
+/// 按日期聚合的统计行
+type DailyRow = (String, i32, i32, i32, i32, i32, f64);
+
 /// 渠道统计行类型
 type ChannelStatsRow = (String, String, i32, i32, i32, i32, i32, f64);
-
-/// 每日统计
-#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
-pub struct UsageDaily {
-    pub id: String,
-    pub date: String,
-    pub api_key_id: Option<String>,
-    pub channel_id: Option<String>,
-    pub group_id: Option<String>,
-    pub model: String,
-    pub request_count: i32,
-    pub success_count: i32,
-    pub failure_count: i32,
-    pub input_tokens: i32,
-    pub output_tokens: i32,
-    pub cache_read_tokens: i32,
-    pub cache_creation_tokens: i32,
-    pub total_cost: f64,
-}
 
 /// 统计概览
 #[derive(Debug, Serialize, Deserialize)]
@@ -62,6 +45,18 @@ pub struct ModelStats {
 pub struct ChannelStats {
     pub channel_id: String,
     pub channel_name: String,
+    pub request_count: i32,
+    pub success_count: i32,
+    pub failure_count: i32,
+    pub input_tokens: i32,
+    pub output_tokens: i32,
+    pub total_cost: f64,
+}
+
+/// 每日统计（按天聚合后返回给前端）
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DailyStats {
+    pub date: String,
     pub request_count: i32,
     pub success_count: i32,
     pub failure_count: i32,
@@ -155,31 +150,29 @@ impl StatsState {
         Self { pool }
     }
 
-    /// 获取统计概览
+    /// 获取统计概览（直接从 usage_logs 实时聚合）
     pub async fn get_overview(&self) -> Result<StatsOverview, sqlx::Error> {
         let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
 
-        // 总计
-        let total = sqlx::query_as::<_, (i64, i64, i64, f64)>(
+        let total: (i64, i64, i64, f64) = sqlx::query_as(
             "SELECT
-                COALESCE(SUM(request_count), 0),
+                COUNT(*),
                 COALESCE(SUM(input_tokens), 0),
                 COALESCE(SUM(output_tokens), 0),
-                COALESCE(CAST(SUM(total_cost) AS REAL), 0.0)
-            FROM usage_daily",
+                CAST(COALESCE(SUM(COALESCE(cost, 0)), 0.0) AS REAL)
+            FROM usage_logs",
         )
         .fetch_one(&self.pool)
         .await?;
 
-        // 今日
-        let today_stats = sqlx::query_as::<_, (i64, i64, i64, f64)>(
+        let today_stats: (i64, i64, i64, f64) = sqlx::query_as(
             "SELECT
-                COALESCE(SUM(request_count), 0),
+                COUNT(*),
                 COALESCE(SUM(input_tokens), 0),
                 COALESCE(SUM(output_tokens), 0),
-                COALESCE(CAST(SUM(total_cost) AS REAL), 0.0)
-            FROM usage_daily
-            WHERE date = ?",
+                CAST(COALESCE(SUM(COALESCE(cost, 0)), 0.0) AS REAL)
+            FROM usage_logs
+            WHERE date(created_at) = ?",
         )
         .bind(&today)
         .fetch_one(&self.pool)
@@ -197,7 +190,7 @@ impl StatsState {
         })
     }
 
-    /// 获取按模型统计
+    /// 获取按模型统计（直接从 usage_logs 实时聚合）
     pub async fn get_model_stats(&self, days: i32) -> Result<Vec<ModelStats>, sqlx::Error> {
         let start_date = (chrono::Utc::now() - chrono::Duration::days(days as i64))
             .format("%Y-%m-%d")
@@ -205,15 +198,15 @@ impl StatsState {
 
         let stats = sqlx::query_as::<_, (String, i32, i32, i32, f64)>(
             "SELECT
-                model,
-                SUM(request_count),
-                SUM(input_tokens),
-                SUM(output_tokens),
-                SUM(total_cost)
-            FROM usage_daily
-            WHERE date >= ?
-            GROUP BY model
-            ORDER BY SUM(request_count) DESC",
+                requested_model,
+                COUNT(*),
+                COALESCE(SUM(input_tokens), 0),
+                COALESCE(SUM(output_tokens), 0),
+                CAST(COALESCE(SUM(COALESCE(cost, 0)), 0.0) AS REAL)
+            FROM usage_logs
+            WHERE date(created_at) >= ?
+            GROUP BY requested_model
+            ORDER BY COUNT(*) DESC",
         )
         .bind(&start_date)
         .fetch_all(&self.pool)
@@ -231,7 +224,7 @@ impl StatsState {
             .collect())
     }
 
-    /// 获取按渠道统计
+    /// 获取按渠道统计（直接从 usage_logs 实时聚合）
     pub async fn get_channel_stats(&self, days: i32) -> Result<Vec<ChannelStats>, sqlx::Error> {
         let start_date = (chrono::Utc::now() - chrono::Duration::days(days as i64))
             .format("%Y-%m-%d")
@@ -239,57 +232,75 @@ impl StatsState {
 
         let rows: Vec<ChannelStatsRow> = sqlx::query_as(
             "SELECT
-                u.channel_id,
+                ul.channel_id,
                 COALESCE(c.name, 'unknown'),
-                SUM(u.request_count),
-                SUM(u.success_count),
-                SUM(u.failure_count),
-                SUM(u.input_tokens),
-                SUM(u.output_tokens),
-                SUM(u.total_cost)
-            FROM usage_daily u
-            LEFT JOIN channels c ON u.channel_id = c.id
-            WHERE u.date >= ?
-            GROUP BY u.channel_id
-            ORDER BY SUM(u.request_count) DESC",
+                COUNT(*),
+                SUM(CASE WHEN ul.status_code >= 200 AND ul.status_code < 400 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN ul.status_code < 200 OR ul.status_code >= 400 THEN 1 ELSE 0 END),
+                COALESCE(SUM(ul.input_tokens), 0),
+                COALESCE(SUM(ul.output_tokens), 0),
+                CAST(COALESCE(SUM(COALESCE(ul.cost, 0)), 0.0) AS REAL)
+            FROM usage_logs ul
+            LEFT JOIN channels c ON ul.channel_id = c.id
+            WHERE date(ul.created_at) >= ?
+            GROUP BY ul.channel_id
+            ORDER BY COUNT(*) DESC",
         )
         .bind(&start_date)
         .fetch_all(&self.pool)
         .await?;
 
-        let stats = rows
+        Ok(rows
             .into_iter()
-            .map(
-                |(id, name, requests, success, failure, input, output, cost)| ChannelStats {
-                    channel_id: id,
-                    channel_name: name,
-                    request_count: requests,
-                    success_count: success,
-                    failure_count: failure,
-                    input_tokens: input,
-                    output_tokens: output,
-                    total_cost: cost,
-                },
-            )
-            .collect();
-
-        Ok(stats)
+            .map(|(id, name, requests, success, failure, input, output, cost)| ChannelStats {
+                channel_id: id,
+                channel_name: name,
+                request_count: requests,
+                success_count: success,
+                failure_count: failure,
+                input_tokens: input,
+                output_tokens: output,
+                total_cost: cost,
+            })
+            .collect())
     }
 
-    /// 获取按天统计
-    pub async fn get_daily_stats(&self, days: i32) -> Result<Vec<UsageDaily>, sqlx::Error> {
+    /// 获取按天统计（直接从 usage_logs 实时聚合）
+    pub async fn get_daily_stats(&self, days: i32) -> Result<Vec<DailyStats>, sqlx::Error> {
         let start_date = (chrono::Utc::now() - chrono::Duration::days(days as i64))
             .format("%Y-%m-%d")
             .to_string();
 
-        let rows: Vec<UsageDaily> = sqlx::query_as(
-            "SELECT id, date, api_key_id, channel_id, group_id, model, request_count, success_count, failure_count, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, total_cost FROM usage_daily WHERE date >= ? ORDER BY date DESC"
+        let rows: Vec<DailyRow> = sqlx::query_as(
+            "SELECT
+                date(created_at),
+                COUNT(*),
+                SUM(CASE WHEN status_code >= 200 AND status_code < 400 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN status_code < 200 OR status_code >= 400 THEN 1 ELSE 0 END),
+                COALESCE(SUM(input_tokens), 0),
+                COALESCE(SUM(output_tokens), 0),
+                CAST(COALESCE(SUM(COALESCE(cost, 0)), 0.0) AS REAL)
+            FROM usage_logs
+            WHERE date(created_at) >= ?
+            GROUP BY date(created_at)
+            ORDER BY date(created_at) DESC",
         )
         .bind(&start_date)
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows)
+        Ok(rows
+            .into_iter()
+            .map(|(date, request_count, success_count, failure_count, input_tokens, output_tokens, total_cost)| DailyStats {
+                date,
+                request_count,
+                success_count,
+                failure_count,
+                input_tokens,
+                output_tokens,
+                total_cost,
+            })
+            .collect())
     }
 
     /// 按日期范围获取按天统计
@@ -297,16 +308,38 @@ impl StatsState {
         &self,
         start: &str,
         end: &str,
-    ) -> Result<Vec<UsageDaily>, sqlx::Error> {
-        let rows: Vec<UsageDaily> = sqlx::query_as(
-            "SELECT id, date, api_key_id, channel_id, group_id, model, request_count, success_count, failure_count, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, total_cost FROM usage_daily WHERE date >= ? AND date <= ? ORDER BY date DESC"
+    ) -> Result<Vec<DailyStats>, sqlx::Error> {
+        let rows: Vec<DailyRow> = sqlx::query_as(
+            "SELECT
+                date(created_at),
+                COUNT(*),
+                SUM(CASE WHEN status_code >= 200 AND status_code < 400 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN status_code < 200 OR status_code >= 400 THEN 1 ELSE 0 END),
+                COALESCE(SUM(input_tokens), 0),
+                COALESCE(SUM(output_tokens), 0),
+                CAST(COALESCE(SUM(COALESCE(cost, 0)), 0.0) AS REAL)
+            FROM usage_logs
+            WHERE date(created_at) >= ? AND date(created_at) <= ?
+            GROUP BY date(created_at)
+            ORDER BY date(created_at) DESC",
         )
         .bind(start)
         .bind(end)
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows)
+        Ok(rows
+            .into_iter()
+            .map(|(date, request_count, success_count, failure_count, input_tokens, output_tokens, total_cost)| DailyStats {
+                date,
+                request_count,
+                success_count,
+                failure_count,
+                input_tokens,
+                output_tokens,
+                total_cost,
+            })
+            .collect())
     }
 
     /// 按日期范围获取按模型统计
@@ -316,9 +349,16 @@ impl StatsState {
         end: &str,
     ) -> Result<Vec<ModelStats>, sqlx::Error> {
         let stats = sqlx::query_as::<_, (String, i32, i32, i32, f64)>(
-            "SELECT model, SUM(request_count), SUM(input_tokens), SUM(output_tokens), SUM(total_cost)
-             FROM usage_daily WHERE date >= ? AND date <= ?
-             GROUP BY model ORDER BY SUM(request_count) DESC",
+            "SELECT
+                requested_model,
+                COUNT(*),
+                COALESCE(SUM(input_tokens), 0),
+                COALESCE(SUM(output_tokens), 0),
+                CAST(COALESCE(SUM(COALESCE(cost, 0)), 0.0) AS REAL)
+            FROM usage_logs
+            WHERE date(created_at) >= ? AND date(created_at) <= ?
+            GROUP BY requested_model
+            ORDER BY COUNT(*) DESC",
         )
         .bind(start)
         .bind(end)
@@ -344,12 +384,20 @@ impl StatsState {
         end: &str,
     ) -> Result<Vec<ChannelStats>, sqlx::Error> {
         let rows: Vec<ChannelStatsRow> = sqlx::query_as(
-            "SELECT u.channel_id, COALESCE(c.name, 'unknown'),
-                    SUM(u.request_count), SUM(u.success_count), SUM(u.failure_count),
-                    SUM(u.input_tokens), SUM(u.output_tokens), SUM(u.total_cost)
-             FROM usage_daily u LEFT JOIN channels c ON u.channel_id = c.id
-             WHERE u.date >= ? AND u.date <= ?
-             GROUP BY u.channel_id ORDER BY SUM(u.request_count) DESC",
+            "SELECT
+                ul.channel_id,
+                COALESCE(c.name, 'unknown'),
+                COUNT(*),
+                SUM(CASE WHEN ul.status_code >= 200 AND ul.status_code < 400 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN ul.status_code < 200 OR ul.status_code >= 400 THEN 1 ELSE 0 END),
+                COALESCE(SUM(ul.input_tokens), 0),
+                COALESCE(SUM(ul.output_tokens), 0),
+                CAST(COALESCE(SUM(COALESCE(ul.cost, 0)), 0.0) AS REAL)
+            FROM usage_logs ul
+            LEFT JOIN channels c ON ul.channel_id = c.id
+            WHERE date(ul.created_at) >= ? AND date(ul.created_at) <= ?
+            GROUP BY ul.channel_id
+            ORDER BY COUNT(*) DESC",
         )
         .bind(start)
         .bind(end)
@@ -358,18 +406,16 @@ impl StatsState {
 
         Ok(rows
             .into_iter()
-            .map(
-                |(id, name, requests, success, failure, input, output, cost)| ChannelStats {
-                    channel_id: id,
-                    channel_name: name,
-                    request_count: requests,
-                    success_count: success,
-                    failure_count: failure,
-                    input_tokens: input,
-                    output_tokens: output,
-                    total_cost: cost,
-                },
-            )
+            .map(|(id, name, requests, success, failure, input, output, cost)| ChannelStats {
+                channel_id: id,
+                channel_name: name,
+                request_count: requests,
+                success_count: success,
+                failure_count: failure,
+                input_tokens: input,
+                output_tokens: output,
+                total_cost: cost,
+            })
             .collect())
     }
 

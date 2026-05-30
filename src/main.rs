@@ -96,12 +96,6 @@ async fn main() -> Result<()> {
     scheduler.start();
     info!("Scheduler started");
 
-    let aggregator = Arc::new(stats::aggregator::StatsAggregator::new(
-        database.pool().clone(),
-    ));
-    aggregator.start();
-    info!("Stats aggregator started");
-
     // 模型信息定时刷新
     let pricing_refresher = Arc::new(stats::pricing_refresher::PricingRefresher::new(
         model_registry.clone(),

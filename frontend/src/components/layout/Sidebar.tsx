@@ -4,7 +4,6 @@ import {
   Radio,
   Layers,
   Key,
-  BarChart3,
   ScrollText,
   FlaskConical,
   Box,
@@ -32,11 +31,6 @@ const navItems = [
     title: 'API Keys',
     href: '/api-keys',
     icon: Key,
-  },
-  {
-    title: '统计分析',
-    href: '/stats',
-    icon: BarChart3,
   },
   {
     title: '请求日志',

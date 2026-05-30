@@ -250,8 +250,8 @@ fn get_migrations() -> Vec<Migration> {
                 CREATE INDEX IF NOT EXISTS idx_usage_logs_channel_id ON usage_logs(channel_id);
                 CREATE INDEX IF NOT EXISTS idx_usage_logs_api_key_id ON usage_logs(api_key_id);
                 CREATE INDEX IF NOT EXISTS idx_usage_logs_requested_model ON usage_logs(requested_model);
-                CREATE INDEX IF NOT EXISTS idx_usage_daily_date ON usage_daily(date);
-                CREATE INDEX IF NOT EXISTS idx_usage_daily_channel_id ON usage_daily(channel_id);
+                CREATE INDEX IF NOT EXISTS idx_usage_logs_created_at ON usage_logs(created_at);
+                CREATE INDEX IF NOT EXISTS idx_usage_logs_status_code ON usage_logs(status_code);
             "#,
         },
     ]
