@@ -259,5 +259,10 @@ fn get_migrations() -> Vec<Migration> {
             name: "add_supported_models_to_api_keys",
             sql: "ALTER TABLE api_keys ADD COLUMN supported_models TEXT NOT NULL DEFAULT '';",
         },
+        Migration {
+            version: 7,
+            name: "add_user_agent_to_usage_logs",
+            sql: "ALTER TABLE usage_logs ADD COLUMN user_agent TEXT;",
+        },
     ]
 }

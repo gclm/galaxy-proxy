@@ -903,7 +903,40 @@ async fn prepare_proxy_request(
         request_body = serde_json::to_vec(&req_val).unwrap_or(request_body);
     }
 
+    // 不应转发到上游的 hop-by-hop / 鉴权 / 连接管理请求头
+    static HOP_BY_HOP: &[&str] = &[
+        "host",
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+        "content-length",
+        "content-type",
+        "accept-encoding",
+        "authorization",
+        "x-api-key",
+        "x-forwarded-for",
+        "x-forwarded-host",
+        "x-forwarded-proto",
+        "x-forwarded-port",
+        "x-real-ip",
+        "forwarded",
+        "cookie",
+    ];
+
     let mut reqwest_headers = reqwest::header::HeaderMap::new();
+    // 黑名单过滤：透传所有不在 HOP_BY_HOP 中的客户端请求头
+    for (key, value) in headers.iter() {
+        if HOP_BY_HOP.iter().any(|h| key.as_str().eq_ignore_ascii_case(h)) {
+            continue;
+        }
+        reqwest_headers.insert(key.clone(), value.clone());
+    }
+
     reqwest_headers.insert("Content-Type", "application/json".parse().unwrap());
 
     if needs_conversion {
@@ -980,6 +1013,7 @@ async fn save_request_record(
     attempts: &[AttemptStats],
     ttft_ms: Option<i32>,
     is_stream: bool,
+    user_agent: Option<String>,
 ) {
     let last = match attempts.last() {
         Some(a) => a,
@@ -1028,6 +1062,7 @@ async fn save_request_record(
         is_stream,
         upstream_key_hint: Some(last.upstream_key_hint.clone()),
         attempts: channel_attempts,
+        user_agent,
     };
 
     let _ = state.stats_recorder.record_request(record).await;
@@ -1169,6 +1204,10 @@ pub async fn proxy_request(
 
     let model = body["model"].as_str().unwrap_or("unknown").to_string();
     let request_content = serde_json::to_string(&body).ok();
+    let user_agent = headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
     let max_retries = 3;
     let mut exclude_ids = Vec::new();
     let mut last_error = None;
@@ -1207,6 +1246,7 @@ pub async fn proxy_request(
                         &attempts,
                         None,
                         false,
+                        user_agent.clone(),
                     )
                     .await;
                     return Ok(result);
@@ -1251,6 +1291,7 @@ pub async fn proxy_request(
                         &attempts,
                         None,
                         false,
+                        user_agent.clone(),
                     )
                     .await;
                     return Err(e);
@@ -1270,6 +1311,7 @@ pub async fn proxy_request(
         &attempts,
         None,
         false,
+        user_agent,
     )
     .await;
     Err(last_error
@@ -1429,6 +1471,10 @@ async fn execute_proxy_stream(
     let sc_api_key_id = api_key_id_clone.clone();
     let sc_request_content = request_content_clone.clone();
     let sc_upstream_key_hint = upstream_key_hint.clone();
+    let sc_user_agent = headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
 
     let stats_recorder = state.stats_recorder.clone();
     let attempts_snapshot: Vec<crate::stats::recorder::ChannelAttempt> = attempts
@@ -1766,6 +1812,7 @@ async fn execute_proxy_stream(
                     is_stream: true,
                     upstream_key_hint: Some(sc_upstream_key_hint),
                     attempts: channel_attempts,
+                    user_agent: sc_user_agent,
                 };
                 stats_recorder.record_request(record).await
             }
@@ -1821,6 +1868,10 @@ pub async fn proxy_stream(
 
     let model = body["model"].as_str().unwrap_or("unknown").to_string();
     let request_content = serde_json::to_string(&body).ok();
+    let user_agent = headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
     let max_retries = 3;
     let mut exclude_ids = Vec::new();
     let mut last_error = None;
@@ -1893,6 +1944,7 @@ pub async fn proxy_stream(
                         &attempts,
                         None,
                         true,
+                        user_agent.clone(),
                     )
                     .await;
                     return Err(e);
@@ -1912,6 +1964,7 @@ pub async fn proxy_stream(
         &attempts,
         None,
         true,
+        user_agent,
     )
     .await;
     Err(last_error

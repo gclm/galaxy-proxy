@@ -309,6 +309,7 @@ export interface RequestLog {
   is_stream: boolean
   upstream_key_hint: string | null
   attempts: ChannelAttempt[] | null
+  user_agent: string | null
 }
 
 export interface RequestLogDetail extends RequestLog {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { formatDate } from '@/lib/utils'
 import { statsApi } from '@/api/stats'
 import { channelsApi } from '@/api/channels'
@@ -106,34 +106,37 @@ export function Logs() {
   const [detailLog, setDetailLog] = useState<RequestLog | null>(null)
   const [logDetail, setLogDetail] = useState<RequestLogDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
-
-  useEffect(() => { setPage(1) }, [selectedModel, selectedChannel, pageSize])
+  const fetchRef = useRef<() => void>(() => {})
 
   useEffect(() => {
     statsApi.logModels().then(setModelOptions).catch(() => {})
     channelsApi.list().then(res => setChannelOptions(res.items)).catch(() => {})
   }, [])
 
-  const fetchLogs = useCallback(async () => {
-    setLoading(true)
-    try {
-      const data = await statsApi.logs({
-        page,
-        page_size: pageSize,
-        model: selectedModel || undefined,
-        channel_id: selectedChannel || undefined,
-        status: status || undefined,
-      })
-      setLogs(data.items)
-      setTotal(data.total)
-    } catch (error) {
-      console.error('Failed to fetch logs:', error)
-    } finally {
-      setLoading(false)
+  useEffect(() => {
+    const controller = new AbortController()
+    const run = async () => {
+      setLoading(true)
+      try {
+        const data = await statsApi.logs({
+          page,
+          page_size: pageSize,
+          model: selectedModel || undefined,
+          channel_id: selectedChannel || undefined,
+          status: status || undefined,
+        })
+        setLogs(data.items)
+        setTotal(data.total)
+      } catch (error) {
+        if (!controller.signal.aborted) console.error('Failed to fetch logs:', error)
+      } finally {
+        if (!controller.signal.aborted) setLoading(false)
+      }
     }
+    run()
+    fetchRef.current = run
+    return () => { controller.abort() }
   }, [page, pageSize, selectedModel, selectedChannel, status])
-
-  useEffect(() => { fetchLogs() }, [fetchLogs])
 
   const openDetail = async (log: RequestLog) => {
     setDetailLog(log)
@@ -191,7 +194,7 @@ export function Logs() {
           <option value="success">成功</option>
           <option value="failure">失败</option>
         </select>
-        <Button variant="outline" size="icon" onClick={fetchLogs} title="刷新">
+        <Button variant="outline" size="icon" onClick={() => fetchRef.current()} title="刷新">
           <RefreshCw className="h-4 w-4" />
         </Button>
       </div>
@@ -295,26 +298,31 @@ export function Logs() {
       {/* 详情弹窗 */}
       <Dialog open={!!detailLog} onOpenChange={(open) => { if (!open) closeDetail() }}>
         <DialogContent className="max-w-4xl h-[85vh] overflow-hidden flex flex-col p-0 gap-0">
-          {detailLog && (
+          {detailLoading ? (
+            <div className="flex items-center justify-center h-48">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              <span className="ml-2 text-sm text-muted-foreground">加载详情...</span>
+            </div>
+          ) : logDetail ? (
             <>
               <DialogHeader className="px-6 pt-6 pb-0">
                 <DialogTitle className="flex items-center gap-3 text-base">
-                  <span className="font-semibold">{detailLog.requested_model}</span>
-                  {detailLog.actual_model && detailLog.actual_model !== detailLog.requested_model && (
+                  <span className="font-semibold">{logDetail.requested_model}</span>
+                  {logDetail.actual_model && logDetail.actual_model !== logDetail.requested_model && (
                     <>
                       <span className="text-muted-foreground">→</span>
-                      <span className="text-muted-foreground">{detailLog.actual_model}</span>
+                      <span className="text-muted-foreground">{logDetail.actual_model}</span>
                     </>
                   )}
-                  {detailLog.error_message ? (
+                  {logDetail.error_message ? (
                     <span className="ml-2 inline-flex items-center gap-1 text-xs text-destructive font-normal">
                       <XCircle className="h-3.5 w-3.5" />
-                      {detailLog.status_code ?? 'ERR'}
+                      {logDetail.status_code ?? 'ERR'}
                     </span>
                   ) : (
                     <span className="ml-2 inline-flex items-center gap-1 text-xs text-green-600 font-normal">
                       <CheckCircle2 className="h-3.5 w-3.5" />
-                      {detailLog.status_code ?? 200}
+                      {logDetail.status_code ?? 200}
                     </span>
                   )}
                 </DialogTitle>
@@ -324,84 +332,89 @@ export function Logs() {
               <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-6 py-3 text-xs text-muted-foreground border-b">
                 <div className="flex items-center gap-1.5">
                   <Clock className="h-3.5 w-3.5" />
-                  <span className="tabular-nums">{formatDate(detailLog.created_at)}</span>
+                  <span className="tabular-nums">{formatDate(logDetail.created_at)}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span>渠道: {detailLog.channel_name ?? '-'}</span>
+                  <span>渠道: {logDetail.channel_name ?? '-'}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span>Key: </span>
-                  <span className="font-mono" title={detailLog.upstream_key_hint ?? undefined}>{detailLog.upstream_key_hint ?? '-'}</span>
+                  <span className="font-mono" title={logDetail.upstream_key_hint ?? undefined}>{logDetail.upstream_key_hint ?? '-'}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <Zap className="h-3.5 w-3.5 text-amber-500" />
-                  <span>耗时 {formatLatency(detailLog.latency_ms)}</span>
+                  <span>耗时 {formatLatency(logDetail.latency_ms)}</span>
                 </div>
-                {detailLog.ttft_ms != null && (
+                {logDetail.ttft_ms != null && (
                   <div className="flex items-center gap-1.5">
                     <Zap className="h-3.5 w-3.5 text-orange-500" />
-                    <span>TTFT {formatLatency(detailLog.ttft_ms)}</span>
+                    <span>TTFT {formatLatency(logDetail.ttft_ms)}</span>
                   </div>
                 )}
-                {detailLog.attempts && detailLog.attempts.length > 1 && (
+                {logDetail.attempts && logDetail.attempts.length > 1 && (
                   <div className="flex items-center gap-1.5">
                     <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span>{detailLog.attempts.length} 次尝试</span>
+                    <span>{logDetail.attempts.length} 次尝试</span>
                   </div>
                 )}
                 <div className="flex items-center gap-1.5">
                   <ArrowDownToLine className="h-3.5 w-3.5 text-green-500" />
-                  <span>输入 {formatNumber(detailLog.input_tokens)}</span>
+                  <span>输入 {formatNumber(logDetail.input_tokens)}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <ArrowUpFromLine className="h-3.5 w-3.5 text-purple-500" />
-                  <span>输出 {formatNumber(detailLog.output_tokens)}</span>
+                  <span>输出 {formatNumber(logDetail.output_tokens)}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <DollarSign className="h-3.5 w-3.5 text-emerald-500" />
-                  <span className="font-medium text-emerald-600 dark:text-emerald-400">{formatCost(detailLog.cost)}</span>
+                  <span className="font-medium text-emerald-600 dark:text-emerald-400">{formatCost(logDetail.cost)}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-primary">
-                    {detailLog.endpoint_type ? (ENDPOINT_LABELS[detailLog.endpoint_type as EndpointType] ?? detailLog.endpoint_type) : '-'}
+                    {logDetail.endpoint_type ? (ENDPOINT_LABELS[logDetail.endpoint_type as EndpointType] ?? logDetail.endpoint_type) : '-'}
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                    detailLog.request_type === 'passthrough'
+                    logDetail.request_type === 'passthrough'
                       ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
                       : 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
                   }`}>
-                    {detailLog.request_type === 'passthrough' ? '直通' : '转换'}
+                    {logDetail.request_type === 'passthrough' ? '直通' : '转换'}
                   </span>
                   <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                    detailLog.is_stream
+                    logDetail.is_stream
                       ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
                       : 'bg-slate-100 text-slate-600 dark:bg-slate-800/30 dark:text-slate-400'
                   }`}>
-                    {detailLog.is_stream ? '流式' : '非流式'}
+                    {logDetail.is_stream ? '流式' : '非流式'}
                   </span>
                 </div>
+                {logDetail.user_agent && (
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span className="font-mono truncate" title={logDetail.user_agent}>{logDetail.user_agent}</span>
+                  </div>
+                )}
               </div>
 
               {/* 错误信息 */}
-              {detailLog.error_message && (
+              {logDetail.error_message && (
                 <div className="mx-6 mt-4 p-3 rounded-xl bg-destructive/10 border border-destructive/20">
                   <div className="flex items-start gap-2">
                     <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-destructive" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-sm font-medium text-destructive">错误信息</span>
-                        <CopyButton text={detailLog.error_message} />
+                        <CopyButton text={logDetail.error_message} />
                       </div>
-                      <pre className="text-xs text-destructive whitespace-pre-wrap break-all leading-relaxed">{detailLog.error_message}</pre>
+                      <pre className="text-xs text-destructive whitespace-pre-wrap break-all leading-relaxed">{logDetail.error_message}</pre>
                     </div>
                   </div>
                 </div>
               )}
 
               {/* 重试链 */}
-              {logDetail?.attempts && logDetail.attempts.length > 0 && (
+              {logDetail.attempts && logDetail.attempts.length > 0 && (
                 <div className="mx-6 mt-4">
                   <div className="flex items-center gap-2 mb-2">
                     <span className="text-sm font-medium">重试链路</span>
@@ -435,38 +448,31 @@ export function Logs() {
 
               {/* 请求/响应内容 */}
               <div className="flex-1 min-h-0 px-6 py-4">
-                {detailLoading ? (
-                  <div className="flex items-center justify-center h-48">
-                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                    <span className="ml-2 text-sm text-muted-foreground">加载内容...</span>
-                  </div>
-                ) : logDetail ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-full min-h-0">
-                    <div className="flex flex-col rounded-xl border bg-muted/30 min-h-0 overflow-hidden">
-                      <div className="flex items-center gap-2 px-3 py-2.5 border-b bg-muted/50 shrink-0">
-                        <Send className="h-4 w-4 text-green-500" />
-                        <span className="text-sm font-medium">请求内容</span>
-                        <span className="ml-auto text-xs text-muted-foreground">{formatNumber(detailLog.input_tokens)} tokens</span>
-                      </div>
-                      <div className="flex-1 min-h-0 overflow-auto">
-                        <JsonBlock content={logDetail.request_content} fallback="无请求内容" />
-                      </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-full min-h-0">
+                  <div className="flex flex-col rounded-xl border bg-muted/30 min-h-0 overflow-hidden">
+                    <div className="flex items-center gap-2 px-3 py-2.5 border-b bg-muted/50 shrink-0">
+                      <Send className="h-4 w-4 text-green-500" />
+                      <span className="text-sm font-medium">请求内容</span>
+                      <span className="ml-auto text-xs text-muted-foreground">{formatNumber(logDetail.input_tokens)} tokens</span>
                     </div>
-                    <div className="flex flex-col rounded-xl border bg-muted/30 min-h-0 overflow-hidden">
-                      <div className="flex items-center gap-2 px-3 py-2.5 border-b bg-muted/50 shrink-0">
-                        <MessageSquare className="h-4 w-4 text-purple-500" />
-                        <span className="text-sm font-medium">响应内容</span>
-                        <span className="ml-auto text-xs text-muted-foreground">{formatNumber(detailLog.output_tokens)} tokens</span>
-                      </div>
-                      <div className="flex-1 min-h-0 overflow-auto">
-                        <JsonBlock content={logDetail.response_content} fallback="无响应内容" />
-                      </div>
+                    <div className="flex-1 min-h-0 overflow-auto">
+                      <JsonBlock content={logDetail.request_content} fallback="无请求内容" />
                     </div>
                   </div>
-                ) : null}
+                  <div className="flex flex-col rounded-xl border bg-muted/30 min-h-0 overflow-hidden">
+                    <div className="flex items-center gap-2 px-3 py-2.5 border-b bg-muted/50 shrink-0">
+                      <MessageSquare className="h-4 w-4 text-purple-500" />
+                      <span className="text-sm font-medium">响应内容</span>
+                      <span className="ml-auto text-xs text-muted-foreground">{formatNumber(logDetail.output_tokens)} tokens</span>
+                    </div>
+                    <div className="flex-1 min-h-0 overflow-auto">
+                      <JsonBlock content={logDetail.response_content} fallback="无响应内容" />
+                    </div>
+                  </div>
+                </div>
               </div>
             </>
-          )}
+          ) : null}
         </DialogContent>
       </Dialog>
     </div>

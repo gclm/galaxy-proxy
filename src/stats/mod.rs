@@ -127,6 +127,7 @@ pub struct UsageLogRow {
     pub request_type: String,
     pub is_stream: bool,
     pub upstream_key_hint: Option<String>,
+    pub user_agent: Option<String>,
     #[sqlx(skip)]
     pub attempts: Option<serde_json::Value>,
     pub raw_attempts: Option<String>,
@@ -160,6 +161,7 @@ pub struct UsageLogDetail {
     pub response_content: Option<String>,
     pub is_stream: bool,
     pub upstream_key_hint: Option<String>,
+    pub user_agent: Option<String>,
     #[sqlx(skip)]
     pub attempts: Option<serde_json::Value>,
     pub raw_attempts: Option<String>,
@@ -502,7 +504,7 @@ impl StatsState {
                       ul.input_tokens, ul.output_tokens,
                       ul.cache_read_tokens, ul.cache_creation_tokens,
                       ul.cost, ul.latency_ms, ul.ttft_ms, ul.status_code, ul.error_message, ul.created_at,
-                      ul.endpoint_type, ul.request_type, ul.is_stream, ul.upstream_key_hint, ul.attempts as raw_attempts
+                      ul.endpoint_type, ul.request_type, ul.is_stream, ul.upstream_key_hint, ul.user_agent, ul.attempts as raw_attempts
                FROM usage_logs ul
                LEFT JOIN api_keys ak ON ul.api_key_id = ak.id
                LEFT JOIN channels c ON ul.channel_id = c.id
@@ -558,7 +560,7 @@ impl StatsState {
                       ul.cache_read_tokens, ul.cache_creation_tokens,
                       ul.cost, ul.latency_ms, ul.ttft_ms, ul.status_code, ul.error_message, ul.created_at,
                       ul.endpoint_type, ul.request_type,
-                      ul.request_content, ul.response_content, ul.is_stream, ul.upstream_key_hint, ul.attempts as raw_attempts
+                      ul.request_content, ul.response_content, ul.is_stream, ul.upstream_key_hint, ul.user_agent, ul.attempts as raw_attempts
                FROM usage_logs ul
                LEFT JOIN api_keys ak ON ul.api_key_id = ak.id
                LEFT JOIN channels c ON ul.channel_id = c.id
