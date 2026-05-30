@@ -26,6 +26,8 @@ struct OpenAiResponsesRequest {
     max_output_tokens: Option<u32>,
     #[serde(default)]
     tools: Option<Vec<serde_json::Value>>,
+    #[serde(default)]
+    previous_response_id: Option<String>,
 }
 
 #[async_trait]
@@ -49,6 +51,7 @@ impl Inbound for OpenAiResponsesInbound {
                 tool_calls: None,
                 tool_call_id: None,
                 reasoning_content: None,
+                cache_control: None,
             }]
         } else if let Some(input_array) = request.input.as_array() {
             // 数组输入
@@ -70,6 +73,7 @@ impl Inbound for OpenAiResponsesInbound {
                             } else {
                                 Content::Parts(vec![ContentPart::Text {
                                     text: serde_json::to_string(c).unwrap_or_default(),
+                                    cache_control: None,
                                 }])
                             }
                         });
@@ -81,6 +85,7 @@ impl Inbound for OpenAiResponsesInbound {
                             tool_calls: None,
                             tool_call_id: None,
                             reasoning_content: None,
+                            cache_control: None,
                         })
                     } else {
                         None
@@ -111,6 +116,11 @@ impl Inbound for OpenAiResponsesInbound {
                 .collect()
         });
 
+        let mut extra = std::collections::HashMap::new();
+        if let Some(prev_id) = request.previous_response_id {
+            extra.insert("previous_response_id".to_string(), serde_json::json!(prev_id));
+        }
+
         Ok(LlmRequest {
             model: request.model,
             messages,
@@ -123,7 +133,7 @@ impl Inbound for OpenAiResponsesInbound {
             tool_choice: None,
             stop: None,
             reasoning_effort: None,
-            extra: std::collections::HashMap::new(),
+            extra,
         })
     }
 
@@ -153,7 +163,7 @@ impl Inbound for OpenAiResponsesInbound {
                         }
                         Content::Parts(parts) => {
                             let text_parts: Vec<_> = parts.iter().filter_map(|p| {
-                            if let ContentPart::Text { text } = p {
+                            if let ContentPart::Text { text, .. } = p {
                                 Some(serde_json::json!({ "type": "output_text", "text": text }))
                             } else {
                                 None
@@ -204,6 +214,19 @@ impl Inbound for OpenAiResponsesInbound {
         let mut events = vec![];
 
         if let Some(choice) = event.first_choice() {
+            if let Some(reasoning) = &choice.delta.reasoning_content {
+                if !reasoning.is_empty() {
+                    events.push(format!(
+                        "event: response.reasoning.delta\ndata: {}\n\n",
+                        serde_json::json!({
+                            "type": "response.reasoning.delta",
+                            "output_index": 0,
+                            "delta": reasoning
+                        })
+                    ));
+                }
+            }
+
             if let Some(content) = &choice.delta.content
                 && let Content::Text(text) = content
                 && !text.is_empty()
@@ -219,15 +242,38 @@ impl Inbound for OpenAiResponsesInbound {
                 ));
             }
 
+            if let Some(tool_calls) = &choice.delta.tool_calls {
+                for tc in tool_calls {
+                    events.push(format!(
+                        "event: response.function_call_arguments.delta\ndata: {}\n\n",
+                        serde_json::json!({
+                            "type": "response.function_call_arguments.delta",
+                            "output_index": 0,
+                            "call_id": tc.id,
+                            "name": tc.function.name,
+                            "delta": tc.function.arguments
+                        })
+                    ));
+                }
+            }
+
             if choice.finish_reason.is_some() {
+                let mut response_obj = serde_json::json!({
+                    "id": event.id,
+                    "status": "completed"
+                });
+                if let Some(usage) = &event.usage {
+                    response_obj["usage"] = serde_json::json!({
+                        "input_tokens": usage.prompt_tokens,
+                        "output_tokens": usage.completion_tokens,
+                        "total_tokens": usage.total_tokens,
+                    });
+                }
                 events.push(format!(
                     "event: response.completed\ndata: {}\n\n",
                     serde_json::json!({
                         "type": "response.completed",
-                        "response": {
-                            "id": event.id,
-                            "status": "completed"
-                        }
+                        "response": response_obj
                     })
                 ));
             }
@@ -264,7 +310,7 @@ impl Outbound for OpenAiResponsesOutbound {
                         let content_parts: Vec<_> = parts
                             .iter()
                             .map(|p| match p {
-                                ContentPart::Text { text } => {
+                                ContentPart::Text { text, .. } => {
                                     serde_json::json!({ "type": "input_text", "text": text })
                                 }
                                 _ => serde_json::json!({ "type": "input_text", "text": "" }),
@@ -300,6 +346,10 @@ impl Outbound for OpenAiResponsesOutbound {
                 })
             }).collect();
             body["tools"] = serde_json::json!(responses_tools);
+        }
+
+        if let Some(prev_id) = request.extra.get("previous_response_id").and_then(|v| v.as_str()) {
+            body["previous_response_id"] = serde_json::json!(prev_id);
         }
 
         serde_json::to_vec(&body)
@@ -346,6 +396,7 @@ impl Outbound for OpenAiResponsesOutbound {
                                 tool_calls: None,
                                 tool_call_id: None,
                                 reasoning_content: None,
+                    cache_control: None,
                             },
                             finish_reason: Some(FinishReason::Stop),
                         });
@@ -411,6 +462,7 @@ impl Outbound for OpenAiResponsesOutbound {
                             tool_calls: None,
                             tool_call_id: None,
                             reasoning_content: None,
+                            cache_control: None,
                         },
                         finish_reason: None,
                     }],
@@ -418,26 +470,101 @@ impl Outbound for OpenAiResponsesOutbound {
                     system_fingerprint: None,
                 }))
             }
-            "response.completed" => Ok(Some(LlmStreamResponse {
-                id: parsed["response"]["id"].as_str().unwrap_or("").to_string(),
-                object: "chat.completion.chunk".to_string(),
-                created: chrono::Utc::now().timestamp(),
-                model: String::new(),
-                choices: vec![StreamChoice {
-                    index: 0,
-                    delta: Message {
-                        role: Role::Assistant,
-                        content: None,
-                        name: None,
-                        tool_calls: None,
-                        tool_call_id: None,
-                        reasoning_content: None,
-                    },
-                    finish_reason: Some(FinishReason::Stop),
-                }],
-                usage: None,
-                system_fingerprint: None,
-            })),
+            "response.reasoning.delta" => {
+                let delta = parsed["delta"].as_str().unwrap_or("");
+                Ok(Some(LlmStreamResponse {
+                    id: parsed["response_id"].as_str().unwrap_or("").to_string(),
+                    object: "chat.completion.chunk".to_string(),
+                    created: chrono::Utc::now().timestamp(),
+                    model: String::new(),
+                    choices: vec![StreamChoice {
+                        index: 0,
+                        delta: Message {
+                            role: Role::Assistant,
+                            content: None,
+                            name: None,
+                            tool_calls: None,
+                            tool_call_id: None,
+                            reasoning_content: Some(delta.to_string()),
+                            cache_control: None,
+                        },
+                        finish_reason: None,
+                    }],
+                    usage: None,
+                    system_fingerprint: None,
+                }))
+            }
+            "response.function_call_arguments.delta" => {
+                let delta = parsed["delta"].as_str().unwrap_or("");
+                let call_id = parsed["call_id"].as_str().unwrap_or("").to_string();
+                let name = parsed["name"].as_str().unwrap_or("").to_string();
+                Ok(Some(LlmStreamResponse {
+                    id: parsed["response_id"].as_str().unwrap_or("").to_string(),
+                    object: "chat.completion.chunk".to_string(),
+                    created: chrono::Utc::now().timestamp(),
+                    model: String::new(),
+                    choices: vec![StreamChoice {
+                        index: 0,
+                        delta: Message {
+                            role: Role::Assistant,
+                            content: None,
+                            name: None,
+                            tool_calls: Some(vec![ToolCall {
+                                id: call_id,
+                                call_type: "function".to_string(),
+                                function: FunctionCall {
+                                    name,
+                                    arguments: delta.to_string(),
+                                },
+                            }]),
+                            tool_call_id: None,
+                            reasoning_content: None,
+                            cache_control: None,
+                        },
+                        finish_reason: None,
+                    }],
+                    usage: None,
+                    system_fingerprint: None,
+                }))
+            }
+            "response.completed" => {
+                let mut usage = None;
+                if let Some(resp) = parsed.get("response") {
+                    if let Some(u) = resp.get("usage") {
+                        usage = Some(Usage {
+                            prompt_tokens: u["input_tokens"].as_u64().unwrap_or(0) as u32,
+                            completion_tokens: u["output_tokens"].as_u64().unwrap_or(0) as u32,
+                            total_tokens: (u["input_tokens"].as_u64().unwrap_or(0)
+                                + u["output_tokens"].as_u64().unwrap_or(0)) as u32,
+                            prompt_tokens_details: None,
+                            completion_tokens_details: None,
+                        });
+                    }
+                }
+                Ok(Some(LlmStreamResponse {
+                    id: parsed["response"]["id"].as_str().unwrap_or("").to_string(),
+                    object: "chat.completion.chunk".to_string(),
+                    created: chrono::Utc::now().timestamp(),
+                    model: String::new(),
+                    choices: vec![StreamChoice {
+                        index: 0,
+                        delta: Message {
+                            role: Role::Assistant,
+                            content: None,
+                            name: None,
+                            tool_calls: None,
+                            tool_call_id: None,
+                            reasoning_content: None,
+                            cache_control: None,
+                        },
+                        finish_reason: Some(FinishReason::Stop),
+                    }],
+                    usage,
+                    system_fingerprint: None,
+                }))
+            }
+            "response.created" | "response.in_progress" | "response.output_item.added"
+            | "response.output_text.done" | "response.function_call_arguments.done" => Ok(None),
             _ => Ok(None),
         }
     }

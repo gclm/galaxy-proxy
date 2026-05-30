@@ -112,6 +112,7 @@ impl Inbound for OpenAiChatInbound {
                     } else {
                         Content::Parts(vec![ContentPart::Text {
                             text: serde_json::to_string(&c).unwrap_or_default(),
+                            cache_control: None,
                         }])
                     }
                 });
@@ -136,6 +137,7 @@ impl Inbound for OpenAiChatInbound {
                     tool_calls,
                     tool_call_id: m.tool_call_id,
                     reasoning_content: None,
+                    cache_control: None,
                 }
             })
             .collect();

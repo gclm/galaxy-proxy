@@ -1446,6 +1446,8 @@ async fn execute_proxy_stream(
         let mut input_usage: Option<serde_json::Value> = None;
         let mut buffer = Vec::new();
         let mut collected_text = String::new();
+        let mut collected_reasoning = String::new();
+        let mut collected_tool_calls: Vec<serde_json::Value> = Vec::new();
         let mut stream_error: Option<String> = None;
         let mut ttft_ms: Option<i32> = None;
         let mut first_token_seen = false;
@@ -1496,11 +1498,24 @@ async fn execute_proxy_stream(
 
                             match outbound.transform_stream_event(&event_bytes) {
                                 Ok(Some(llm_stream)) => {
-                                    if let Some(choice) = llm_stream.first_choice()
-                                        && let Some(crate::protocol::model::Content::Text(t)) = &choice.delta.content
+                                    if let Some(choice) = llm_stream.first_choice() {
+                                        if let Some(crate::protocol::model::Content::Text(t)) = &choice.delta.content
                                             && !t.is_empty() {
                                                 collected_text.push_str(t);
                                             }
+                                        if let Some(r) = &choice.delta.reasoning_content {
+                                            collected_reasoning.push_str(r);
+                                        }
+                                        if let Some(tcs) = &choice.delta.tool_calls {
+                                            for tc in tcs {
+                                                collected_tool_calls.push(serde_json::json!({
+                                                    "id": tc.id,
+                                                    "name": tc.function.name,
+                                                    "arguments": tc.function.arguments,
+                                                }));
+                                            }
+                                        }
+                                    }
                                     match inbound.transform_stream_event(&llm_stream) {
                                         Ok(converted) => {
                                             yield Ok::<_, std::convert::Infallible>(Bytes::from(converted));
@@ -1571,7 +1586,7 @@ async fn execute_proxy_stream(
                                     && let Some(error) = extract_error_from_sse(text, &upstream_endpoint_clone) {
                                     stream_error = Some(error);
                                 }
-                                collect_sse_text(text, &upstream_endpoint_clone, &mut collected_text);
+                                collect_sse_content(text, &upstream_endpoint_clone, &mut collected_text, &mut collected_reasoning, &mut collected_tool_calls);
                             }
                         }
 
@@ -1598,7 +1613,7 @@ async fn execute_proxy_stream(
                         && let Some(error) = extract_error_from_sse(text, &upstream_endpoint_clone) {
                         stream_error = Some(error);
                     }
-                    collect_sse_text(text, &upstream_endpoint_clone, &mut collected_text);
+                    collect_sse_content(text, &upstream_endpoint_clone, &mut collected_text, &mut collected_reasoning, &mut collected_tool_calls);
                 }
             }
         }
@@ -1649,10 +1664,12 @@ async fn execute_proxy_stream(
             )
         } else {
             state_clone.lb_state.record_success(&channel_id_clone, latency_ms as f64).await;
-            let resp = if collected_text.is_empty() && input_tokens == 0 && output_tokens == 0 {
+            let resp = if collected_text.is_empty() && collected_reasoning.is_empty()
+                && collected_tool_calls.is_empty() && input_tokens == 0 && output_tokens == 0
+            {
                 None
             } else {
-                Some(serde_json::json!({
+                let mut resp_json = serde_json::json!({
                     "content": collected_text,
                     "usage": {
                         "input_tokens": input_tokens,
@@ -1660,7 +1677,14 @@ async fn execute_proxy_stream(
                         "cache_read_tokens": cache_read,
                         "cache_creation_tokens": cache_creation,
                     }
-                }).to_string())
+                });
+                if !collected_reasoning.is_empty() {
+                    resp_json["reasoning"] = serde_json::json!(collected_reasoning);
+                }
+                if !collected_tool_calls.is_empty() {
+                    resp_json["tool_calls"] = serde_json::json!(collected_tool_calls);
+                }
+                Some(resp_json.to_string())
             };
             (200i32, None, resp)
         };
@@ -2257,8 +2281,14 @@ fn format_stream_error_event(error_body: &str, client_endpoint: &EndpointType) -
     }
 }
 
-/// 从直通模式的 SSE 文本中提取内容文本
-fn collect_sse_text(text: &str, endpoint_type: &EndpointType, output: &mut String) {
+/// 从直通模式的 SSE 文本中提取内容
+fn collect_sse_content(
+    text: &str,
+    endpoint_type: &EndpointType,
+    output: &mut String,
+    reasoning: &mut String,
+    tool_calls: &mut Vec<serde_json::Value>,
+) {
     match endpoint_type {
         EndpointType::OpenAiChat | EndpointType::OpenAiResponse => {
             for line in text.lines() {
@@ -2266,23 +2296,55 @@ fn collect_sse_text(text: &str, endpoint_type: &EndpointType, output: &mut Strin
                     if data == "[DONE]" {
                         continue;
                     }
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data)
-                        && let Some(content) = parsed["choices"][0]["delta"]["content"].as_str()
-                        && !content.is_empty()
-                    {
-                        output.push_str(content);
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
+                        if let Some(content) = parsed["choices"][0]["delta"]["content"].as_str()
+                            && !content.is_empty()
+                        {
+                            output.push_str(content);
+                        }
+                        if let Some(r) = parsed["choices"][0]["delta"]["reasoning_content"].as_str()
+                            && !r.is_empty()
+                        {
+                            reasoning.push_str(r);
+                        }
+                        if let Some(tcs) = parsed["choices"][0]["delta"]["tool_calls"].as_array() {
+                            for tc in tcs {
+                                tool_calls.push(serde_json::json!({
+                                    "id": tc["id"],
+                                    "name": tc["function"]["name"],
+                                    "arguments": tc["function"]["arguments"],
+                                }));
+                            }
+                        }
                     }
                 }
             }
         }
         EndpointType::Anthropic => {
+            let mut event_type = "";
+            let mut data = "";
             for line in text.lines() {
-                if let Some(data) = line.strip_prefix("data: ")
-                    && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data)
-                    && parsed["type"] == "content_block_delta"
-                    && let Some(t) = parsed["delta"]["text"].as_str()
-                {
-                    output.push_str(t);
+                if let Some(stripped) = line.strip_prefix("event: ") {
+                    event_type = stripped.trim();
+                } else if let Some(stripped) = line.strip_prefix("data: ") {
+                    data = stripped.trim_start();
+                }
+            }
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
+                match event_type {
+                    "content_block_delta" => {
+                        if parsed["delta"]["type"] == "text_delta"
+                            && let Some(t) = parsed["delta"]["text"].as_str()
+                        {
+                            output.push_str(t);
+                        }
+                        if parsed["delta"]["type"] == "thinking_delta"
+                            && let Some(t) = parsed["delta"]["thinking"].as_str()
+                        {
+                            reasoning.push_str(t);
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
