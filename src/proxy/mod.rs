@@ -1628,15 +1628,21 @@ async fn execute_proxy_stream(
             EndpointType::Anthropic => {
                 let input = input_usage.as_ref()
                     .and_then(|u| u["input_tokens"].as_i64())
+                    .filter(|&v| v > 0)
+                    .or_else(|| last_usage.as_ref().and_then(|u| u["usage"]["input_tokens"].as_i64()))
                     .unwrap_or(0) as i32;
                 let output = last_usage.as_ref()
                     .and_then(|u| u["usage"]["output_tokens"].as_i64())
                     .unwrap_or(0) as i32;
                 let cache_read = input_usage.as_ref()
                     .and_then(|u| u["cache_read_input_tokens"].as_i64())
+                    .filter(|&v| v > 0)
+                    .or_else(|| last_usage.as_ref().and_then(|u| u["usage"]["cache_read_input_tokens"].as_i64()))
                     .unwrap_or(0) as i32;
                 let cache_creation = input_usage.as_ref()
                     .and_then(|u| u["cache_creation_input_tokens"].as_i64())
+                    .filter(|&v| v > 0)
+                    .or_else(|| last_usage.as_ref().and_then(|u| u["usage"]["cache_creation_input_tokens"].as_i64()))
                     .unwrap_or(0) as i32;
                 (input, output, cache_read, cache_creation)
             }
