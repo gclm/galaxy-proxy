@@ -15,6 +15,7 @@ pub struct ApiKey {
     pub name: String,
     pub api_key: String,
     pub enabled: bool,
+    pub supported_models: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -23,6 +24,7 @@ pub struct ApiKey {
 #[derive(Debug, Deserialize)]
 pub struct CreateApiKeyRequest {
     pub name: String,
+    pub supported_models: Option<String>,
 }
 
 /// 更新 API Key 请求
@@ -30,6 +32,7 @@ pub struct CreateApiKeyRequest {
 pub struct UpdateApiKeyRequest {
     pub name: Option<String>,
     pub enabled: Option<bool>,
+    pub supported_models: Option<String>,
 }
 
 /// API Key 状态
@@ -38,12 +41,26 @@ pub struct ApiKeyState {
     pub pool: SqlitePool,
 }
 
+/// 空字符串转 None
+fn empty_to_none(s: String) -> Option<String> {
+    if s.is_empty() { None } else { Some(s) }
+}
+
+/// 解析逗号分隔的模型列表
+pub fn parse_supported_models(models_str: &str) -> Vec<String> {
+    models_str
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
 /// 获取 API Key 列表
 pub async fn list(
     State(state): State<ApiKeyState>,
 ) -> Result<Json<ApiResponse<Vec<ApiKey>>>, (StatusCode, Json<ApiError>)> {
-    let keys = sqlx::query_as::<_, (String, String, String, bool, String, String)>(
-        "SELECT id, name, api_key, enabled, created_at, updated_at FROM api_keys ORDER BY created_at DESC"
+    let keys = sqlx::query_as::<_, (String, String, String, bool, String, String, String)>(
+        "SELECT id, name, api_key, enabled, supported_models, created_at, updated_at FROM api_keys ORDER BY created_at DESC"
     )
     .fetch_all(&state.pool)
     .await
@@ -52,11 +69,12 @@ pub async fn list(
     let result: Vec<ApiKey> = keys
         .into_iter()
         .map(
-            |(id, name, api_key, enabled, created_at, updated_at)| ApiKey {
+            |(id, name, api_key, enabled, supported_models, created_at, updated_at)| ApiKey {
                 id,
                 name,
                 api_key,
                 enabled,
+                supported_models: empty_to_none(supported_models),
                 created_at,
                 updated_at,
             },
@@ -78,18 +96,20 @@ pub async fn create(
 
     let id = generate_id();
     let api_key = format!("gp-{}", generate_id());
+    let supported_models = req.supported_models.unwrap_or_default();
 
     // 插入 API Key
     sqlx::query(
         r#"
-        INSERT INTO api_keys (id, name, api_key, enabled)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO api_keys (id, name, api_key, enabled, supported_models)
+        VALUES (?, ?, ?, ?, ?)
         "#,
     )
     .bind(&id)
     .bind(&req.name)
     .bind(&api_key)
     .bind(true)
+    .bind(&supported_models)
     .execute(&state.pool)
     .await
     .map_err(|e| ApiError::internal_error(e.to_string()))?;
@@ -99,6 +119,7 @@ pub async fn create(
         name: req.name,
         api_key,
         enabled: true,
+        supported_models: if supported_models.is_empty() { None } else { Some(supported_models) },
         created_at: chrono::Utc::now().to_rfc3339(),
         updated_at: chrono::Utc::now().to_rfc3339(),
     };
@@ -111,15 +132,15 @@ pub async fn get(
     State(state): State<ApiKeyState>,
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<ApiKey>>, (StatusCode, Json<ApiError>)> {
-    let result = sqlx::query_as::<_, (String, String, String, bool, String, String)>(
-        "SELECT id, name, api_key, enabled, created_at, updated_at FROM api_keys WHERE id = ?",
+    let result = sqlx::query_as::<_, (String, String, String, bool, String, String, String)>(
+        "SELECT id, name, api_key, enabled, supported_models, created_at, updated_at FROM api_keys WHERE id = ?",
     )
     .bind(&id)
     .fetch_optional(&state.pool)
     .await
     .map_err(|e| ApiError::internal_error(e.to_string()))?;
 
-    let (id, name, api_key, enabled, created_at, updated_at) =
+    let (id, name, api_key, enabled, supported_models, created_at, updated_at) =
         result.ok_or_else(|| ApiError::not_found("API Key 不存在"))?;
 
     Ok(Json(ApiResponse::success(ApiKey {
@@ -127,6 +148,7 @@ pub async fn get(
         name,
         api_key,
         enabled,
+        supported_models: if supported_models.is_empty() { None } else { Some(supported_models) },
         created_at,
         updated_at,
     })))
@@ -162,6 +184,11 @@ pub async fn update(
     if let Some(enabled) = req.enabled {
         separated.push("enabled = ");
         separated.push_bind_unseparated(enabled);
+        has_update = true;
+    }
+    if let Some(ref supported_models) = req.supported_models {
+        separated.push("supported_models = ");
+        separated.push_bind_unseparated(supported_models);
         has_update = true;
     }
 

@@ -254,5 +254,10 @@ fn get_migrations() -> Vec<Migration> {
                 CREATE INDEX IF NOT EXISTS idx_usage_logs_status_code ON usage_logs(status_code);
             "#,
         },
+        Migration {
+            version: 6,
+            name: "add_supported_models_to_api_keys",
+            sql: "ALTER TABLE api_keys ADD COLUMN supported_models TEXT NOT NULL DEFAULT '';",
+        },
     ]
 }

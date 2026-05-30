@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { apiKeysApi } from '@/api'
-import type { ApiKey } from '@/api/types'
+import { apiKeysApi, groupsApi } from '@/api'
+import type { ApiKey, Group } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/StatusBadge'
 import { ConfirmDeleteDialog } from '@/components/ConfirmDeleteDialog'
@@ -36,6 +36,10 @@ export function ApiKeys() {
 
   const [deleteId, setDeleteId] = useState<string | null>(null)
 
+  // 分组列表（用于模型选择）
+  const [availableGroups, setAvailableGroups] = useState<Group[]>([])
+  const [selectedModels, setSelectedModels] = useState<string[]>([])
+
   const fetchApiKeys = useCallback(async () => {
     setLoading(true)
     try {
@@ -48,16 +52,28 @@ export function ApiKeys() {
     }
   }, [])
 
+  const fetchGroups = useCallback(async () => {
+    try {
+      const res = await groupsApi.list({ page_size: 1000 })
+      setAvailableGroups(res.items)
+    } catch (error) {
+      console.error('Failed to fetch groups:', error)
+    }
+  }, [])
+
   useEffect(() => { fetchApiKeys() }, [fetchApiKeys])
+  useEffect(() => { fetchGroups() }, [fetchGroups])
 
   const handleCreate = async () => {
     if (!newKeyName.trim()) return
     setCreating(true)
     try {
-      const key = await apiKeysApi.create({ name: newKeyName.trim() })
+      const supportedModels = selectedModels.length > 0 ? selectedModels.join(',') : undefined
+      const key = await apiKeysApi.create({ name: newKeyName.trim(), supported_models: supportedModels })
       setNewKeyResult(key)
       setApiKeys(prev => [key, ...prev])
       setNewKeyName('')
+      setSelectedModels([])
     } catch (error) {
       console.error('Failed to create API key:', error)
     } finally {
@@ -87,6 +103,15 @@ export function ApiKeys() {
     setCreateOpen(false)
     setNewKeyResult(null)
     setNewKeyName('')
+    setSelectedModels([])
+  }
+
+  const toggleModel = (model: string) => {
+    setSelectedModels(prev =>
+      prev.includes(model)
+        ? prev.filter(m => m !== model)
+        : [...prev, model]
+    )
   }
 
   const filteredKeys = apiKeys.filter(k =>
@@ -96,6 +121,14 @@ export function ApiKeys() {
   const maskKey = (key: string) => {
     if (key.length <= 12) return key
     return key.substring(0, 8) + '...' + key.substring(key.length - 4)
+  }
+
+  const formatSupportedModels = (models: string | null) => {
+    if (!models) return '全部模型'
+    const list = models.split(',').map(s => s.trim()).filter(Boolean)
+    if (list.length === 0) return '全部模型'
+    if (list.length <= 3) return list.join(', ')
+    return `${list.slice(0, 3).join(', ')} 等 ${list.length} 个`
   }
 
   return (
@@ -132,6 +165,7 @@ export function ApiKeys() {
             <tr className="border-b bg-muted/50">
               <th className="text-left px-4 py-3 font-medium">名称</th>
               <th className="text-left px-4 py-3 font-medium">Key</th>
+              <th className="text-left px-4 py-3 font-medium">可用模型</th>
               <th className="text-center px-4 py-3 font-medium">状态</th>
               <th className="text-left px-4 py-3 font-medium">创建时间</th>
               <th className="text-center px-4 py-3 font-medium">操作</th>
@@ -140,11 +174,11 @@ export function ApiKeys() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={5} className="text-center py-12 text-muted-foreground">加载中...</td>
+                <td colSpan={6} className="text-center py-12 text-muted-foreground">加载中...</td>
               </tr>
             ) : filteredKeys.length === 0 ? (
               <tr>
-                <td colSpan={5} className="text-center py-12 text-muted-foreground">
+                <td colSpan={6} className="text-center py-12 text-muted-foreground">
                   {search ? '没有匹配的 API Key' : '暂无 API Key，点击上方按钮创建'}
                 </td>
               </tr>
@@ -171,6 +205,9 @@ export function ApiKeys() {
                           : <Copy className="h-3.5 w-3.5" />}
                       </button>
                     </div>
+                  </td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground">
+                    {formatSupportedModels(apiKey.supported_models)}
                   </td>
                   <td className="px-4 py-3 text-center">
                     <StatusBadge enabled={apiKey.enabled} onClick={() => handleToggleEnabled(apiKey)} />
@@ -208,6 +245,34 @@ export function ApiKeys() {
                   placeholder="例如：前端应用"
                   onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">可用模型（留空表示全部可用）</label>
+                {availableGroups.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">暂无可用分组</p>
+                ) : (
+                  <div className="max-h-48 overflow-y-auto rounded-lg border p-2 space-y-1">
+                    {availableGroups.map(group => (
+                      <label
+                        key={group.id}
+                        className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted/50 cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedModels.includes(group.name)}
+                          onChange={() => toggleModel(group.name)}
+                          className="rounded"
+                        />
+                        <span className="text-sm">{group.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                {selectedModels.length > 0 && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    已选择 {selectedModels.length} 个模型
+                  </p>
+                )}
               </div>
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={closeCreateDialog}>取消</Button>

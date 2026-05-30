@@ -186,17 +186,20 @@ export interface ApiKey {
   name: string
   api_key: string
   enabled: boolean
+  supported_models: string | null
   created_at: string
   updated_at: string
 }
 
 export interface CreateApiKeyRequest {
   name: string
+  supported_models?: string
 }
 
 export interface UpdateApiKeyRequest {
   name?: string
   enabled?: boolean
+  supported_models?: string
 }
 
 // 分页响应

@@ -1,50 +1,25 @@
 use axum::{Json, extract::State, response::IntoResponse};
 use sqlx::SqlitePool;
 
+use crate::api::handlers::admin::api_keys::parse_supported_models;
 use crate::api::middleware::ApiKeyAuth;
 
-/// 获取可用模型列表（分组名 + 渠道直接支持的模型）
-pub async fn list(_auth: ApiKeyAuth, State(pool): State<SqlitePool>) -> impl IntoResponse {
-    // 获取所有启用的分组名
+/// 获取可用模型列表（仅分组名，支持 API Key 模型过滤）
+pub async fn list(auth: ApiKeyAuth, State(pool): State<SqlitePool>) -> impl IntoResponse {
     let groups = sqlx::query_scalar::<_, String>("SELECT name FROM groups WHERE enabled = 1")
         .fetch_all(&pool)
-        .await;
+        .await
+        .unwrap_or_default();
 
-    // 获取渠道直接支持的模型
-    let channel_models =
-        sqlx::query_scalar::<_, String>("SELECT models FROM channels WHERE enabled = 1")
-            .fetch_all(&pool)
-            .await;
+    let supported_models = get_supported_models(&pool, &auth.key_id).await;
 
-    let mut model_set = std::collections::HashSet::new();
+    let models: Vec<String> = if let Some(supported) = supported_models {
+        groups.into_iter().filter(|g| supported.contains(g)).collect()
+    } else {
+        groups
+    };
 
-    if let Ok(names) = &groups {
-        for name in names {
-            model_set.insert(name.clone());
-        }
-    }
-
-    if let Ok(model_lists) = &channel_models {
-        for models_str in model_lists {
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(models_str) {
-                if let Some(arr) = value.as_array() {
-                    for m in arr {
-                        if let Some(s) = m.as_str() {
-                            model_set.insert(s.to_string());
-                        }
-                    }
-                } else if let Some(available) = value["available_models"].as_array() {
-                    for m in available {
-                        if let Some(s) = m.as_str() {
-                            model_set.insert(s.to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    let models: Vec<serde_json::Value> = model_set
+    let data: Vec<serde_json::Value> = models
         .into_iter()
         .map(|name| {
             serde_json::json!({
@@ -58,7 +33,24 @@ pub async fn list(_auth: ApiKeyAuth, State(pool): State<SqlitePool>) -> impl Int
 
     Json(serde_json::json!({
         "object": "list",
-        "data": models
+        "data": data
     }))
     .into_response()
+}
+
+/// 获取 API Key 的支持模型列表
+async fn get_supported_models(pool: &SqlitePool, key_id: &str) -> Option<Vec<String>> {
+    let result = sqlx::query_scalar::<_, String>(
+        "SELECT supported_models FROM api_keys WHERE id = ?"
+    )
+    .bind(key_id)
+    .fetch_optional(pool)
+    .await
+    .ok()??;
+
+    if result.is_empty() {
+        return None;
+    }
+
+    Some(parse_supported_models(&result))
 }

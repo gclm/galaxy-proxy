@@ -237,7 +237,7 @@ export function Dashboard() {
 
 function ChartCard({ title, data, dataKey, color, emptyText }: {
   title: string
-  data: Record<string, unknown>[]
+  data: DailyStats[]
   dataKey: string
   color: string
   emptyText: string
@@ -262,7 +262,7 @@ function ChartCard({ title, data, dataKey, color, emptyText }: {
   )
 }
 
-function TokenTrendChart({ data }: { data: Record<string, unknown>[] }) {
+function TokenTrendChart({ data }: { data: DailyStats[] }) {
   return (
     <div>
       <h3 className="text-xs font-medium text-muted-foreground mb-3">Token 用量趋势</h3>
@@ -354,7 +354,7 @@ function ChannelBarChart({ channels }: { channels: ChannelStats[] }) {
   )
 }
 
-function CostTrendChart({ data }: { data: Record<string, unknown>[] }) {
+function CostTrendChart({ data }: { data: DailyStats[] }) {
   return (
     <div>
       <h3 className="text-xs font-medium text-muted-foreground mb-3">每日成本</h3>

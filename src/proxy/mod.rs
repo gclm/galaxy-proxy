@@ -1841,8 +1841,14 @@ pub async fn handle_proxy_request(
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
 
+    let model = body["model"].as_str().unwrap_or("unknown");
     let is_stream = body["stream"].as_bool().unwrap_or(false);
     let api_key_id = Some(auth.key_id.as_str());
+
+    // 验证 API Key 是否有权访问目标模型
+    if let Err(e) = validate_model_access(&state.pool, &auth.key_id, model).await {
+        return format_proxy_error(e, error_format);
+    }
 
     if is_stream {
         match proxy_stream(state, api_key_id, &headers, &body, client_endpoint).await {
@@ -1867,6 +1873,34 @@ pub async fn handle_proxy_request(
             Err(e) => format_proxy_error(e, error_format),
         }
     }
+}
+
+/// 验证 API Key 是否有权访问目标模型
+async fn validate_model_access(
+    pool: &SqlitePool,
+    key_id: &str,
+    model: &str,
+) -> Result<(), ProxyError> {
+    let supported = sqlx::query_scalar::<_, String>(
+        "SELECT supported_models FROM api_keys WHERE id = ? AND enabled = 1"
+    )
+    .bind(key_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| ProxyError::DatabaseError(e.to_string()))?;
+
+    if let Some(models_str) = supported {
+        if !models_str.is_empty() {
+            let allowed = crate::api::handlers::admin::api_keys::parse_supported_models(&models_str);
+            if !allowed.iter().any(|m| m == model) {
+                return Err(ProxyError::NoAvailableChannel(
+                    format!("API Key 无权访问模型: {}", model)
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// 格式化代理错误为 HTTP 响应
